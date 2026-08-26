@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
   <title id="title">Agent Rules Manager</title>
-  <desc id="desc">One rules document projecting to four agent targets.</desc>
+<desc id="desc">One rules document connecting to multiple agent targets.</desc>
   <rect width="1024" height="1024" rx="224" fill="#16252d"/>
   <path d="M752 1024H1024V752L752 1024Z" fill="#2855d9"/>
   <rect x="188" y="188" width="316" height="648" rx="52" fill="#f8fbfc"/>

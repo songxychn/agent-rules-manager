@@ -1,11 +1,12 @@
 use crate::{
-    default_adapters, AgentAdapter, AgentStatus, ApplyOutcome, ArmError, DeployMode, PlanStep,
-    ProjectionPlan, RollbackOutcome, TargetState, WorkspaceSnapshot,
+    default_adapters, AgentAdapter, AgentStatus, ApplyOutcome, ArmError, ConnectionChange,
+    DeployMode, PlanStep, ProjectionPlan, RollbackOutcome, TargetKind, TargetState,
+    WorkspaceSnapshot,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -62,6 +63,15 @@ struct PreparedChange {
     path: PathBuf,
     original: FileState,
     desired: FileState,
+}
+
+#[derive(Debug, Clone)]
+struct TargetInspection {
+    state: TargetState,
+    kind: TargetKind,
+    connected: bool,
+    mode: DeployMode,
+    detail: String,
 }
 
 impl RulesManager {
@@ -136,11 +146,26 @@ impl RulesManager {
     }
 
     pub fn plan(&self, selected: &[String]) -> Result<ProjectionPlan, ArmError> {
+        let selected = self.resolve_selection(selected)?;
+        let changes = selected
+            .into_iter()
+            .map(|agent_id| ConnectionChange {
+                agent_id,
+                connected: true,
+            })
+            .collect::<Vec<_>>();
+        self.plan_connections(&changes)
+    }
+
+    pub fn plan_connections(
+        &self,
+        changes: &[ConnectionChange],
+    ) -> Result<ProjectionPlan, ArmError> {
         let source_path = self.source_path();
         if !source_path.exists() {
             return Err(ArmError::MissingSource(source_path.display().to_string()));
         }
-        let selected = self.resolve_selection(selected)?;
+        let requested = self.resolve_connection_changes(changes)?;
         let mut blocked = false;
         let mut change_count = 0;
         let mut steps = Vec::new();
@@ -148,44 +173,73 @@ impl RulesManager {
         for adapter in self
             .adapters
             .iter()
-            .filter(|adapter| selected.contains(&adapter.id))
+            .filter(|adapter| requested.contains_key(&adapter.id))
         {
             let status = self.inspect_adapter(adapter, &source_path)?;
-            let (action, summary) = match status.state {
-                TargetState::InSync => ("none", "Already projects the canonical rules."),
-                TargetState::Ready => {
-                    change_count += 1;
-                    match adapter.mode {
-                        DeployMode::Include => (
-                            "addInclude",
-                            "Append a managed include block without replacing existing content.",
-                        ),
-                        DeployMode::Symlink => (
-                            "createLink",
-                            "Create a symbolic link to the canonical rules file.",
-                        ),
-                    }
+            let desired_connected = requested[&adapter.id];
+            let (action, summary) = match (desired_connected, status.target_kind) {
+                (true, TargetKind::ConnectedLink) => {
+                    ("none", "Already links to the canonical rules.")
                 }
-                TargetState::Drifted => {
+                (true, TargetKind::Missing) => {
                     change_count += 1;
                     (
-                        "refreshManagedBlock",
-                        "Refresh the existing Agent Rules Manager block.",
+                        "createLink",
+                        "Create a symbolic link to the canonical rules file.",
                     )
                 }
-                TargetState::Conflict => {
+                (true, TargetKind::LegacyInclude) => {
+                    let current = read_file_state(&adapter.target_path)?;
+                    if legacy_include_is_only_managed_content(&current) {
+                        change_count += 1;
+                        (
+                            "migrateLegacyInclude",
+                            "Replace the legacy managed include with a symbolic link.",
+                        )
+                    } else {
+                        blocked = true;
+                        (
+                            "blocked",
+                            "Legacy managed content is mixed with agent-specific rules; disconnect it before moving those rules aside.",
+                        )
+                    }
+                }
+                (true, TargetKind::IndependentFile) => {
                     blocked = true;
                     (
                         "blocked",
-                        "An unmanaged file or link is present; import or move it before apply.",
+                        "An independent rules file is present and will not be overwritten.",
                     )
                 }
+                (true, TargetKind::ForeignLink | TargetKind::InvalidManagedFile) => {
+                    blocked = true;
+                    (
+                        "blocked",
+                        "An unexpected link or malformed managed file is present.",
+                    )
+                }
+                (false, TargetKind::ConnectedLink) => {
+                    change_count += 1;
+                    (
+                        "createIndependentFile",
+                        "Replace the managed link with an independent copy of the current canonical rules.",
+                    )
+                }
+                (false, TargetKind::LegacyInclude) => {
+                    change_count += 1;
+                    (
+                        "detachManagedInclude",
+                        "Replace the legacy managed include with an independent copy while preserving surrounding content.",
+                    )
+                }
+                (false, _) => ("none", "Already uses an independent native path."),
             };
             steps.push(PlanStep {
                 agent_id: status.id,
                 agent_label: status.label,
                 target_path: status.target_path,
                 state: status.state,
+                desired_connected,
                 action: action.into(),
                 summary: summary.into(),
             });
@@ -200,15 +254,30 @@ impl RulesManager {
     }
 
     pub fn apply(&self, selected: &[String]) -> Result<ApplyOutcome, ArmError> {
+        let selected = self.resolve_selection(selected)?;
+        let changes = selected
+            .into_iter()
+            .map(|agent_id| ConnectionChange {
+                agent_id,
+                connected: true,
+            })
+            .collect::<Vec<_>>();
+        self.apply_connections(&changes)
+    }
+
+    pub fn apply_connections(
+        &self,
+        changes: &[ConnectionChange],
+    ) -> Result<ApplyOutcome, ArmError> {
         let source = self.source_path();
         let source = fs::canonicalize(&source)
             .map_err(|error| ArmError::io(source.display().to_string(), error))?;
-        let plan = self.plan(selected)?;
+        let plan = self.plan_connections(changes)?;
         if plan.blocked {
             let targets = plan
                 .steps
                 .iter()
-                .filter(|step| step.state == TargetState::Conflict)
+                .filter(|step| step.action == "blocked")
                 .map(|step| step.target_path.as_str())
                 .collect::<Vec<_>>()
                 .join(", ");
@@ -218,7 +287,7 @@ impl RulesManager {
         let changed_steps = plan
             .steps
             .iter()
-            .filter(|step| matches!(step.state, TargetState::Ready | TargetState::Drifted))
+            .filter(|step| step.action != "none" && step.action != "blocked")
             .collect::<Vec<_>>();
         if changed_steps.is_empty() {
             return Ok(ApplyOutcome {
@@ -237,7 +306,7 @@ impl RulesManager {
                 .iter()
                 .find(|adapter| adapter.id == step.agent_id)
                 .ok_or_else(|| ArmError::UnknownAgent(step.agent_id.clone()))?;
-            let desired = desired_adapter_state(adapter, &source, &original)?;
+            let desired = desired_connection_state(adapter, &source, &original, &step.action)?;
             prepared.push(PreparedChange {
                 agent_id: step.agent_id.clone(),
                 path,
@@ -274,7 +343,7 @@ impl RulesManager {
                 let _ = restore_prepared_changes(&prepared[..index]);
                 return Err(ArmError::ApplyDrift(change.path.display().to_string()));
             }
-            if let Err(error) = write_file_state(&change.path, &change.desired) {
+            if let Err(error) = replace_file_state(&change.path, &change.original, &change.desired) {
                 if restore_prepared_changes(&prepared[..index]) {
                     let _ = self.archive_backup(&backup_path);
                 }
@@ -348,22 +417,43 @@ impl RulesManager {
         Ok(selected.iter().cloned().collect())
     }
 
+    fn resolve_connection_changes(
+        &self,
+        changes: &[ConnectionChange],
+    ) -> Result<BTreeMap<String, bool>, ArmError> {
+        let known = self
+            .adapters
+            .iter()
+            .map(|adapter| adapter.id.as_str())
+            .collect::<BTreeSet<_>>();
+        let mut requested = BTreeMap::new();
+        for change in changes {
+            if !known.contains(change.agent_id.as_str()) {
+                return Err(ArmError::UnknownAgent(change.agent_id.clone()));
+            }
+            requested.insert(change.agent_id.clone(), change.connected);
+        }
+        Ok(requested)
+    }
+
     fn inspect_adapter(
         &self,
         adapter: &AgentAdapter,
         source_path: &Path,
     ) -> Result<AgentStatus, ArmError> {
-        let (state, detail) = match adapter.mode {
-            DeployMode::Include => inspect_include_target(&adapter.target_path, source_path)?,
-            DeployMode::Symlink => inspect_symlink_target(&adapter.target_path, source_path)?,
-        };
+        let inspection = inspect_projection_target(&adapter.target_path, source_path)?;
+        let (installed, detection_detail) = detect_adapter(adapter);
         Ok(AgentStatus {
             id: adapter.id.clone(),
             label: adapter.label.clone(),
             target_path: adapter.target_path.display().to_string(),
-            mode: adapter.mode,
-            state,
-            detail,
+            mode: inspection.mode,
+            state: inspection.state,
+            target_kind: inspection.kind,
+            installed,
+            connected: inspection.connected,
+            detection_detail,
+            detail: inspection.detail,
         })
     }
 
@@ -445,118 +535,189 @@ fn home_dir() -> Result<PathBuf, ArmError> {
         .ok_or_else(|| ArmError::MissingSource("HOME is not set".into()))
 }
 
-fn inspect_symlink_target(target: &Path, source: &Path) -> Result<(TargetState, String), ArmError> {
-    let metadata = match fs::symlink_metadata(target) {
-        Ok(metadata) => metadata,
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok((TargetState::Ready, "No target file yet.".into()))
-        }
-        Err(error) => return Err(ArmError::io(target.display().to_string(), error)),
-    };
-    if !metadata.file_type().is_symlink() {
-        return Ok((
-            TargetState::Conflict,
-            "A regular, unmanaged entry already exists.".into(),
-        ));
+fn detect_adapter(adapter: &AgentAdapter) -> (bool, String) {
+    if let Some(path) = adapter
+        .detection_paths
+        .iter()
+        .find(|path| fs::symlink_metadata(path).is_ok())
+    {
+        return (
+            true,
+            format!("Detected installation marker at {}.", path.display()),
+        );
     }
-    let linked =
-        fs::read_link(target).map_err(|error| ArmError::io(target.display().to_string(), error))?;
+
+    for command in &adapter.command_names {
+        if let Some(path) = find_command(command) {
+            return (
+                true,
+                format!("Detected {command} at {}.", path.display()),
+            );
+        }
+    }
+
+    (
+        false,
+        "No supported command or configuration directory was detected.".into(),
+    )
+}
+
+fn find_command(command: &str) -> Option<PathBuf> {
+    let path = env::var_os("PATH")?;
+    for directory in env::split_paths(&path) {
+        #[cfg(windows)]
+        let candidates = [
+            directory.join(command),
+            directory.join(format!("{command}.exe")),
+            directory.join(format!("{command}.cmd")),
+            directory.join(format!("{command}.bat")),
+        ];
+        #[cfg(not(windows))]
+        let candidates = [directory.join(command)];
+
+        for candidate in candidates {
+            if fs::metadata(&candidate).is_ok_and(|metadata| metadata.is_file()) {
+                return Some(candidate);
+            }
+        }
+    }
+    None
+}
+
+fn inspect_projection_target(
+    target: &Path,
+    source: &Path,
+) -> Result<TargetInspection, ArmError> {
+    match read_file_state(target)? {
+        FileState::Missing => Ok(TargetInspection {
+            state: TargetState::Ready,
+            kind: TargetKind::Missing,
+            connected: false,
+            mode: DeployMode::Symlink,
+            detail: "No native rules file exists yet.".into(),
+        }),
+        FileState::Symlink { target: linked } => {
+            if link_points_to_source(target, Path::new(&linked), source) {
+                Ok(TargetInspection {
+                    state: TargetState::InSync,
+                    kind: TargetKind::ConnectedLink,
+                    connected: true,
+                    mode: DeployMode::Symlink,
+                    detail: "Linked directly to the canonical rules.".into(),
+                })
+            } else {
+                Ok(TargetInspection {
+                    state: TargetState::Conflict,
+                    kind: TargetKind::ForeignLink,
+                    connected: false,
+                    mode: DeployMode::Symlink,
+                    detail: "The existing symbolic link points somewhere else.".into(),
+                })
+            }
+        }
+        FileState::File { content } => match managed_include_span(&content) {
+            Ok(None) => Ok(TargetInspection {
+                state: TargetState::Ready,
+                kind: TargetKind::IndependentFile,
+                connected: false,
+                mode: DeployMode::Symlink,
+                detail: "Uses an independent native rules file.".into(),
+            }),
+            Ok(Some((start, end))) => {
+                let current = &content[start..end];
+                let detail = if current == include_block(source) {
+                    "Uses the legacy managed include; new connections use symbolic links."
+                } else {
+                    "The legacy managed include points to a different canonical source."
+                };
+                Ok(TargetInspection {
+                    state: TargetState::Drifted,
+                    kind: TargetKind::LegacyInclude,
+                    connected: true,
+                    mode: DeployMode::Include,
+                    detail: detail.into(),
+                })
+            }
+            Err(()) => Ok(TargetInspection {
+                state: TargetState::Conflict,
+                kind: TargetKind::InvalidManagedFile,
+                connected: false,
+                mode: DeployMode::Include,
+                detail: "Managed block markers are incomplete, duplicated, or out of order."
+                    .into(),
+            }),
+        },
+    }
+}
+
+fn link_points_to_source(target: &Path, linked: &Path, source: &Path) -> bool {
     let linked = if linked.is_absolute() {
-        linked
+        linked.to_path_buf()
     } else {
         target
             .parent()
             .unwrap_or_else(|| Path::new("."))
             .join(linked)
     };
-    let source_canonical = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
-    let linked_canonical = fs::canonicalize(&linked).unwrap_or(linked);
-    if linked_canonical == source_canonical {
-        Ok((
-            TargetState::InSync,
-            "Linked directly to the canonical rules.".into(),
-        ))
-    } else {
-        Ok((
-            TargetState::Conflict,
-            "The existing link points somewhere else.".into(),
-        ))
+    let source = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+    let linked = fs::canonicalize(&linked).unwrap_or(linked);
+    linked == source
+}
+
+fn managed_include_span(content: &str) -> Result<Option<(usize, usize)>, ()> {
+    let starts = content.match_indices(INCLUDE_START).collect::<Vec<_>>();
+    let ends = content.match_indices(INCLUDE_END).collect::<Vec<_>>();
+    match (starts.as_slice(), ends.as_slice()) {
+        ([], []) => Ok(None),
+        ([(start, _)], [(end, _)]) if start < end => Ok(Some((*start, end + INCLUDE_END.len()))),
+        _ => Err(()),
     }
 }
 
-fn inspect_include_target(target: &Path, source: &Path) -> Result<(TargetState, String), ArmError> {
-    let state = read_file_state(target)?;
-    match state {
-        FileState::Missing => Ok((
-            TargetState::Ready,
-            "A new Claude instruction file will be created.".into(),
-        )),
-        FileState::Symlink { target: linked } => {
-            let linked = PathBuf::from(linked);
-            let linked = if linked.is_absolute() {
-                linked
-            } else {
-                target
-                    .parent()
-                    .unwrap_or_else(|| Path::new("."))
-                    .join(linked)
-            };
-            let source = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
-            let linked = fs::canonicalize(&linked).unwrap_or(linked);
-            if linked == source {
-                Ok((
-                    TargetState::InSync,
-                    "Claude links directly to the canonical rules.".into(),
-                ))
-            } else {
-                Ok((
-                    TargetState::Conflict,
-                    "Claude uses an unmanaged symbolic link.".into(),
-                ))
-            }
-        }
-        FileState::File { content } => {
-            let start = content.find(INCLUDE_START);
-            let end = content.find(INCLUDE_END);
-            match (start, end) {
-                (None, None) => Ok((
-                    TargetState::Ready,
-                    "Existing Claude instructions will be preserved.".into(),
-                )),
-                (Some(start), Some(end)) if start < end => {
-                    let end = end + INCLUDE_END.len();
-                    let current = &content[start..end];
-                    let desired = include_block(source);
-                    if current == desired {
-                        Ok((
-                            TargetState::InSync,
-                            "Managed include block is current.".into(),
-                        ))
-                    } else {
-                        Ok((
-                            TargetState::Drifted,
-                            "Managed include block points to a different source.".into(),
-                        ))
-                    }
-                }
-                _ => Ok((
-                    TargetState::Conflict,
-                    "Managed block markers are incomplete or out of order.".into(),
-                )),
-            }
-        }
-    }
+fn legacy_include_is_only_managed_content(state: &FileState) -> bool {
+    let FileState::File { content } = state else {
+        return false;
+    };
+    let Ok(Some((start, end))) = managed_include_span(content) else {
+        return false;
+    };
+    format!("{}{}", &content[..start], &content[end..])
+        .trim()
+        .is_empty()
 }
 
-fn write_file_state(path: &Path, state: &FileState) -> Result<(), ArmError> {
+fn replace_file_state(
+    path: &Path,
+    original: &FileState,
+    desired: &FileState,
+) -> Result<(), ArmError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)
             .map_err(|error| ArmError::io(parent.display().to_string(), error))?;
     }
-    match state {
-        FileState::File { content } => write_atomic(path, content),
-        FileState::Symlink { target } => create_symlink(Path::new(target), path),
-        FileState::Missing => Err(ArmError::UnsupportedEntry(path.display().to_string())),
+    match (original, desired) {
+        (FileState::Missing, FileState::File { content }) => write_atomic(path, content),
+        (FileState::Missing, FileState::Symlink { target }) => {
+            create_symlink(Path::new(target), path)
+        }
+        (FileState::File { .. }, FileState::File { content }) => write_atomic(path, content),
+        (FileState::Symlink { .. }, FileState::File { content }) => {
+            fs::remove_file(path).map_err(|error| ArmError::io(path.display().to_string(), error))?;
+            if let Err(error) = write_atomic(path, content) {
+                let _ = restore_file_state(path, original);
+                return Err(error);
+            }
+            Ok(())
+        }
+        (FileState::File { .. } | FileState::Symlink { .. }, FileState::Symlink { target }) => {
+            fs::remove_file(path).map_err(|error| ArmError::io(path.display().to_string(), error))?;
+            if let Err(error) = create_symlink(Path::new(target), path) {
+                let _ = restore_file_state(path, original);
+                return Err(error);
+            }
+            Ok(())
+        }
+        (_, FileState::Missing) => Err(ArmError::UnsupportedEntry(path.display().to_string())),
     }
 }
 
@@ -576,56 +737,58 @@ fn restore_prepared_changes(changes: &[PreparedChange]) -> bool {
     restored
 }
 
-fn desired_adapter_state(
+fn desired_connection_state(
     adapter: &AgentAdapter,
     source: &Path,
     current: &FileState,
+    action: &str,
 ) -> Result<FileState, ArmError> {
-    match adapter.mode {
-        DeployMode::Include => desired_include_state(&adapter.target_path, source, current),
-        DeployMode::Symlink => match current {
-            FileState::Missing => Ok(FileState::Symlink {
+    match action {
+        "createLink" if matches!(current, FileState::Missing) => Ok(FileState::Symlink {
+            target: source.display().to_string(),
+        }),
+        "migrateLegacyInclude" if legacy_include_is_only_managed_content(current) => {
+            Ok(FileState::Symlink {
                 target: source.display().to_string(),
-            }),
-            _ => Err(ArmError::Blocked(adapter.target_path.display().to_string())),
-        },
-    }
-}
-
-fn desired_include_state(
-    target: &Path,
-    source: &Path,
-    current: &FileState,
-) -> Result<FileState, ArmError> {
-    let desired = include_block(source);
-    let content = match current {
-        FileState::Missing => format!("{desired}\n"),
-        FileState::File { content } => {
-            let start = content.find(INCLUDE_START);
-            let end = content.find(INCLUDE_END);
-            match (start, end) {
-                (None, None) => {
-                    let separator = if content.is_empty() || content.ends_with('\n') {
-                        ""
-                    } else {
-                        "\n"
-                    };
-                    format!("{content}{separator}\n{desired}\n")
-                }
-                (Some(start), Some(end)) if start < end => {
-                    let end = end + INCLUDE_END.len();
-                    format!("{}{}{}", &content[..start], desired, &content[end..])
-                }
-                _ => {
-                    return Err(ArmError::Blocked(target.display().to_string()));
-                }
+            })
+        }
+        "createIndependentFile" => {
+            let FileState::Symlink { target: linked } = current else {
+                return Err(ArmError::ApplyDrift(
+                    adapter.target_path.display().to_string(),
+                ));
+            };
+            if !link_points_to_source(&adapter.target_path, Path::new(linked), source) {
+                return Err(ArmError::ApplyDrift(
+                    adapter.target_path.display().to_string(),
+                ));
             }
+            let content = fs::read_to_string(source)
+                .map_err(|error| ArmError::io(source.display().to_string(), error))?;
+            Ok(FileState::File { content })
         }
-        FileState::Symlink { .. } => {
-            return Err(ArmError::Blocked(target.display().to_string()));
+        "detachManagedInclude" => {
+            let FileState::File { content } = current else {
+                return Err(ArmError::ApplyDrift(
+                    adapter.target_path.display().to_string(),
+                ));
+            };
+            let Some((start, end)) = managed_include_span(content).map_err(|()| {
+                ArmError::ApplyDrift(adapter.target_path.display().to_string())
+            })?
+            else {
+                return Err(ArmError::ApplyDrift(
+                    adapter.target_path.display().to_string(),
+                ));
+            };
+            let source_content = fs::read_to_string(source)
+                .map_err(|error| ArmError::io(source.display().to_string(), error))?;
+            Ok(FileState::File {
+                content: format!("{}{}{}", &content[..start], source_content, &content[end..]),
+            })
         }
-    };
-    Ok(FileState::File { content })
+        _ => Err(ArmError::Blocked(adapter.target_path.display().to_string())),
+    }
 }
 
 fn include_block(source: &Path) -> String {
@@ -703,7 +866,6 @@ fn create_symlink(source: &Path, target: &Path) -> Result<(), ArmError> {
 #[cfg(windows)]
 fn create_symlink(source: &Path, target: &Path) -> Result<(), ArmError> {
     std::os::windows::fs::symlink_file(source, target)
-        .or_else(|_| fs::copy(source, target).map(|_| ()))
         .map_err(|error| ArmError::io(target.display().to_string(), error))
 }
 
@@ -748,23 +910,20 @@ mod tests {
     fn initialize_plan_apply_and_rollback_are_lossless() {
         let (_root, manager, home) = fixture();
         manager.initialize().expect("initialize");
-        let claude = home.join(".claude/CLAUDE.md");
-        fs::create_dir_all(claude.parent().unwrap()).expect("claude dir");
-        fs::write(&claude, "@RTK.md\n").expect("claude file");
 
         let plan = manager.plan(&[]).expect("plan");
         assert!(!plan.blocked);
-        assert_eq!(plan.change_count, 4);
+        assert_eq!(plan.change_count, 5);
 
         let applied = manager.apply(&[]).expect("apply");
-        assert_eq!(applied.changed.len(), 4);
-        assert!(fs::read_to_string(&claude).unwrap().contains("@RTK.md"));
-        assert!(fs::read_to_string(&claude).unwrap().contains(INCLUDE_START));
+        assert_eq!(applied.changed.len(), 5);
+        assert!(home.join(".claude/CLAUDE.md").is_symlink());
         assert!(home.join(".codex/AGENTS.md").is_symlink());
+        assert!(home.join(".qwen/QWEN.md").is_symlink());
 
         let rollback = manager.rollback_latest().expect("rollback");
-        assert_eq!(rollback.restored.len(), 4);
-        assert_eq!(fs::read_to_string(&claude).unwrap(), "@RTK.md\n");
+        assert_eq!(rollback.restored.len(), 5);
+        assert!(!home.join(".claude/CLAUDE.md").exists());
         assert!(!home.join(".codex/AGENTS.md").exists());
     }
 
@@ -789,6 +948,7 @@ mod tests {
         manager.initialize().expect("initialize");
         manager.apply(&["claude".into()]).expect("apply");
         let claude = home.join(".claude/CLAUDE.md");
+        fs::remove_file(&claude).expect("remove managed link");
         fs::write(&claude, "changed later").expect("drift");
 
         assert!(matches!(
@@ -796,6 +956,73 @@ mod tests {
             Err(ArmError::RollbackDrift(_))
         ));
         assert_eq!(fs::read_to_string(claude).unwrap(), "changed later");
+    }
+
+    #[test]
+    fn disconnect_materializes_an_independent_file_and_rollback_restores_the_link() {
+        let (_root, manager, home) = fixture();
+        let source = manager.initialize().expect("initialize");
+        manager.apply(&["qwen".into()]).expect("connect qwen");
+        let qwen = home.join(".qwen/QWEN.md");
+        assert!(qwen.is_symlink());
+
+        let changes = [ConnectionChange {
+            agent_id: "qwen".into(),
+            connected: false,
+        }];
+        let plan = manager.plan_connections(&changes).expect("disconnect plan");
+        assert!(!plan.blocked);
+        assert_eq!(plan.steps[0].action, "createIndependentFile");
+        manager
+            .apply_connections(&changes)
+            .expect("disconnect qwen");
+
+        assert!(!qwen.is_symlink());
+        assert_eq!(fs::read_to_string(&qwen).unwrap(), fs::read_to_string(source).unwrap());
+
+        manager.rollback_latest().expect("rollback disconnect");
+        assert!(qwen.is_symlink());
+    }
+
+    #[test]
+    fn legacy_include_can_be_detached_without_losing_surrounding_rules() {
+        let (_root, manager, home) = fixture();
+        let source = manager.initialize().expect("initialize");
+        let claude = home.join(".claude/CLAUDE.md");
+        fs::create_dir_all(claude.parent().unwrap()).expect("claude dir");
+        fs::write(
+            &claude,
+            format!("Claude only\n\n{}\n", include_block(&source)),
+        )
+        .expect("legacy include");
+
+        let changes = [ConnectionChange {
+            agent_id: "claude".into(),
+            connected: false,
+        }];
+        let plan = manager.plan_connections(&changes).expect("detach plan");
+        assert_eq!(plan.steps[0].action, "detachManagedInclude");
+        manager.apply_connections(&changes).expect("detach include");
+
+        let detached = fs::read_to_string(claude).unwrap();
+        assert!(detached.contains("Claude only"));
+        assert!(detached.contains("# Shared agent rules"));
+        assert!(!detached.contains(INCLUDE_START));
+    }
+
+    #[test]
+    fn configuration_directory_marks_qwen_as_installed() {
+        let (_root, manager, home) = fixture();
+        fs::create_dir_all(home.join(".qwen")).expect("qwen config");
+
+        let snapshot = manager.snapshot().expect("snapshot");
+        let qwen = snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.id == "qwen")
+            .expect("qwen adapter");
+        assert!(qwen.installed);
+        assert_eq!(qwen.target_path, home.join(".qwen/QWEN.md").display().to_string());
     }
 
     #[test]

@@ -762,11 +762,19 @@ code {
 
 .rail-ready .rail-line,
 .rail-drifted .rail-line {
-  background: #efd39d;
+  background: #dfe4e6;
 }
 
 .rail-ready .rail-flow,
 .rail-drifted .rail-flow {
+  border-color: #c9d0d3;
+}
+
+.agent-rail.is-pending .rail-line {
+  background: #efd39d;
+}
+
+.agent-rail.is-pending .rail-flow {
   border-color: var(--amber);
 }
 
@@ -781,7 +789,7 @@ code {
 .agent-node {
   display: grid;
   min-width: 0;
-  min-height: 62px;
+  min-height: 74px;
   grid-template-columns: 34px minmax(0, 1fr) auto;
   align-items: center;
   gap: 11px;
@@ -798,7 +806,30 @@ code {
 
 .rail-ready .agent-node,
 .rail-drifted .agent-node {
-  border-color: #efd6a8;
+  border-color: var(--line);
+}
+
+.agent-rail.is-pending .agent-node {
+  border-color: #e9c67f;
+  box-shadow: 0 0 0 2px rgba(211, 153, 43, 0.08);
+}
+
+.agent-rail.is-unavailable {
+  color: #626970;
+}
+
+.agent-rail.is-unavailable .agent-node {
+  border-color: #e1e4e6;
+  background: #fafbfb;
+}
+
+.agent-rail.is-unavailable .agent-title-row strong {
+  color: #626970;
+}
+
+.agent-rail.is-unavailable .agent-copy code,
+.agent-rail.is-unavailable .agent-copy .agent-mode {
+  color: #656c73;
 }
 
 .rail-conflict .agent-node {
@@ -843,6 +874,12 @@ code {
   color: #625e8f;
 }
 
+.agent-mark-qwen {
+  border-color: #c8d9f2;
+  background: #f1f6fd;
+  color: #365f9b;
+}
+
 .agent-copy {
   display: flex;
   min-width: 0;
@@ -862,6 +899,20 @@ code {
   font-weight: 650;
 }
 
+.detected-badge {
+  display: inline-flex;
+  min-height: 17px;
+  align-items: center;
+  padding: 0 5px;
+  border: 1px solid #cce6dd;
+  border-radius: 999px;
+  background: #f0faf6;
+  color: #16715a;
+  font-size: 7px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
 .agent-copy code {
   margin-top: 3px;
   overflow: hidden;
@@ -875,6 +926,20 @@ code {
   margin-top: 3px;
   color: #6e737b;
   font-size: 8px;
+}
+
+.agent-copy .agent-mode {
+  color: #4f625d;
+  font-weight: 650;
+}
+
+.agent-copy .agent-detail {
+  display: -webkit-box;
+  overflow: hidden;
+  color: #666c73;
+  line-height: 1.35;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 1;
 }
 
 .agent-copy .agent-action-preview {
@@ -898,8 +963,71 @@ code {
 
 .agent-node-side {
   display: flex;
+  align-items: flex-end;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.connection-switch {
+  display: inline-flex;
+  min-width: 86px;
   align-items: center;
-  gap: 12px;
+  justify-content: flex-end;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: #71767e;
+  font: inherit;
+  font-size: 8px;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.connection-switch:disabled {
+  cursor: not-allowed;
+}
+
+.switch-track {
+  position: relative;
+  display: inline-flex;
+  width: 28px;
+  height: 16px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 2px;
+  border: 1px solid #cbd0d4;
+  border-radius: 999px;
+  background: #eef0f2;
+  transition: border-color 140ms ease, background 140ms ease;
+}
+
+.switch-knob {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(35, 41, 47, 0.22);
+  transition: transform 140ms ease;
+}
+
+.connection-switch.is-on {
+  color: var(--mint-dark);
+}
+
+.connection-switch.is-on .switch-track {
+  border-color: #58bf9f;
+  background: var(--mint);
+}
+
+.connection-switch.is-on .switch-knob {
+  transform: translateX(12px);
+}
+
+.connection-switch:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 4px;
+  border-radius: 5px;
 }
 
 .status-pill {
@@ -920,7 +1048,12 @@ code {
   color: #087559;
 }
 
-.status-ready,
+.status-ready {
+  border-color: #d2d7da;
+  background: #f4f5f6;
+  color: #626970;
+}
+
 .status-drifted {
   border-color: #efca88;
   background: var(--amber-soft);
@@ -931,6 +1064,12 @@ code {
   border-color: #efb7b3;
   background: var(--red-soft);
   color: #a33b35;
+}
+
+.status-unavailable {
+  border-color: #d9dde0;
+  background: #f3f4f5;
+  color: #5f666d;
 }
 
 .projection-status-bar {
@@ -1714,6 +1853,9 @@ code {
 
   .agent-node-side {
     grid-column: 2;
+    width: 100%;
+    align-items: center;
+    flex-direction: row;
     justify-content: space-between;
   }
 

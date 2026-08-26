@@ -1,37 +1,48 @@
-import type { ProjectionPlan, WorkspaceSnapshot } from "./types";
+import type { ConnectionChange, ProjectionPlan, WorkspaceSnapshot } from "./types";
 
 export function buildProjectionPlan(
   snapshot: WorkspaceSnapshot,
-  selectedAgents: string[],
+  changes: ConnectionChange[],
 ): ProjectionPlan {
-  const selected = new Set(selectedAgents);
+  const requested = new Map(changes.map((change) => [change.agentId, change.connected]));
   const steps = snapshot.agents
-    .filter((agent) => selected.has(agent.id))
-    .map((agent) => ({
+    .filter((agent) => requested.has(agent.id))
+    .map((agent) => {
+      const desiredConnected = requested.get(agent.id) ?? agent.connected;
+      let action = "none";
+      let summary = "Already uses the selected connection mode.";
+
+      if (desiredConnected !== agent.connected) {
+        if (desiredConnected && agent.targetKind === "missing") {
+          action = "createLink";
+          summary = "Create a symbolic link to the canonical rules file.";
+        } else if (desiredConnected) {
+          action = "blocked";
+          summary = "The existing independent file or unexpected link will not be overwritten.";
+        } else if (agent.targetKind === "connectedLink") {
+          action = "createIndependentFile";
+          summary = "Replace the managed link with an independent copy.";
+        } else if (agent.targetKind === "legacyInclude") {
+          action = "detachManagedInclude";
+          summary = "Replace the managed include with an independent copy.";
+        }
+      }
+
+      return {
       agentId: agent.id,
       agentLabel: agent.label,
       targetPath: agent.targetPath,
       state: agent.state,
-      action:
-        agent.state === "inSync"
-          ? "none"
-          : agent.state === "conflict"
-            ? "blocked"
-            : agent.mode === "include"
-              ? "addInclude"
-              : "createLink",
-      summary:
-        agent.state === "inSync"
-          ? "Already projects the canonical rules."
-          : agent.state === "conflict"
-            ? "An unmanaged file is present."
-            : "Create a safe projection without duplicating rule content.",
-    }));
+        desiredConnected,
+        action,
+        summary,
+      };
+    });
 
   return {
     sourcePath: snapshot.sourcePath,
-    blocked: steps.some((step) => step.state === "conflict"),
-    changeCount: steps.filter((step) => step.state === "ready" || step.state === "drifted").length,
+    blocked: steps.some((step) => step.action === "blocked"),
+    changeCount: steps.filter((step) => step.action !== "none" && step.action !== "blocked").length,
     steps,
   };
 }

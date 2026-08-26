@@ -1,5 +1,12 @@
 export type DeployMode = "include" | "symlink";
 export type TargetState = "inSync" | "ready" | "drifted" | "conflict";
+export type TargetKind =
+  | "missing"
+  | "connectedLink"
+  | "independentFile"
+  | "legacyInclude"
+  | "foreignLink"
+  | "invalidManagedFile";
 
 export interface AgentStatus {
   id: string;
@@ -7,7 +14,16 @@ export interface AgentStatus {
   targetPath: string;
   mode: DeployMode;
   state: TargetState;
+  targetKind: TargetKind;
+  installed: boolean;
+  connected: boolean;
+  detectionDetail: string;
   detail: string;
+}
+
+export interface ConnectionChange {
+  agentId: string;
+  connected: boolean;
 }
 
 export interface WorkspaceSnapshot {
@@ -33,6 +49,7 @@ export interface PlanStep {
   agentLabel: string;
   targetPath: string;
   state: TargetState;
+  desiredConnected: boolean;
   action: string;
   summary: string;
 }

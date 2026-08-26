@@ -17,6 +17,8 @@ pub struct AgentAdapter {
     pub target_path: PathBuf,
     pub mode: DeployMode,
     pub note: String,
+    pub command_names: Vec<String>,
+    pub detection_paths: Vec<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -28,6 +30,17 @@ pub enum TargetState {
     Conflict,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum TargetKind {
+    Missing,
+    ConnectedLink,
+    IndependentFile,
+    LegacyInclude,
+    ForeignLink,
+    InvalidManagedFile,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentStatus {
@@ -36,7 +49,18 @@ pub struct AgentStatus {
     pub target_path: String,
     pub mode: DeployMode,
     pub state: TargetState,
+    pub target_kind: TargetKind,
+    pub installed: bool,
+    pub connected: bool,
+    pub detection_detail: String,
     pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectionChange {
+    pub agent_id: String,
+    pub connected: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -58,6 +82,7 @@ pub struct PlanStep {
     pub agent_label: String,
     pub target_path: String,
     pub state: TargetState,
+    pub desired_connected: bool,
     pub action: String,
     pub summary: String,
 }

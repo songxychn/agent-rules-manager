@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ApplyOutcome,
+  ConnectionChange,
   OpenTarget,
   ProjectionPlan,
   RollbackOutcome,
@@ -22,9 +23,13 @@ let demoSnapshot: WorkspaceSnapshot = {
       id: "claude",
       label: "Claude Code",
       targetPath: "/Users/baizhukui/.claude/CLAUDE.md",
-      mode: "include",
+      mode: "symlink",
       state: "inSync",
-      detail: "Managed include block is current.",
+      targetKind: "connectedLink",
+      installed: true,
+      connected: true,
+      detectionDetail: "Detected configuration at /Users/baizhukui/.claude.",
+      detail: "Linked directly to the canonical rules.",
     },
     {
       id: "codex",
@@ -32,6 +37,10 @@ let demoSnapshot: WorkspaceSnapshot = {
       targetPath: "/Users/baizhukui/.codex/AGENTS.md",
       mode: "symlink",
       state: "inSync",
+      targetKind: "connectedLink",
+      installed: true,
+      connected: true,
+      detectionDetail: "Detected codex in the ChatGPT application.",
       detail: "Linked directly to the canonical rules.",
     },
     {
@@ -39,8 +48,12 @@ let demoSnapshot: WorkspaceSnapshot = {
       label: "Grok",
       targetPath: "/Users/baizhukui/.grok/AGENTS.md",
       mode: "symlink",
-      state: "inSync",
-      detail: "Linked directly to the canonical rules.",
+      state: "ready",
+      targetKind: "missing",
+      installed: false,
+      connected: false,
+      detectionDetail: "No supported command or configuration directory was detected.",
+      detail: "No native rules file exists yet.",
     },
     {
       id: "opencode",
@@ -48,10 +61,27 @@ let demoSnapshot: WorkspaceSnapshot = {
       targetPath: "/Users/baizhukui/.config/opencode/AGENTS.md",
       mode: "symlink",
       state: "ready",
-      detail: "No target file yet.",
+      targetKind: "independentFile",
+      installed: true,
+      connected: false,
+      detectionDetail: "Detected configuration at /Users/baizhukui/.config/opencode.",
+      detail: "Uses an independent native rules file.",
+    },
+    {
+      id: "qwen",
+      label: "Qwen Code",
+      targetPath: "/Users/baizhukui/.qwen/QWEN.md",
+      mode: "symlink",
+      state: "ready",
+      targetKind: "missing",
+      installed: true,
+      connected: false,
+      detectionDetail: "Detected configuration at /Users/baizhukui/.qwen.",
+      detail: "No native rules file exists yet.",
     },
   ],
 };
+let demoRollbackSnapshot: WorkspaceSnapshot | undefined;
 
 const demoOpenTargets: OpenTarget[] = [
   { id: "default", label: "Default app", kind: "default" },
@@ -81,11 +111,11 @@ export const backend = {
     demoSnapshot.sourceExists = true;
     return demoSnapshot.sourcePath;
   },
-  async preview(agents: string[], libraryRoot?: string): Promise<ProjectionPlan> {
+  async preview(changes: ConnectionChange[], libraryRoot?: string): Promise<ProjectionPlan> {
     if (isTauri) {
-      return invoke("preview_apply", { agents, libraryRoot });
+      return invoke("preview_apply", { changes, libraryRoot });
     }
-    return buildProjectionPlan(demoSnapshot, agents);
+    return buildProjectionPlan(demoSnapshot, changes);
   },
   async openTargets(): Promise<OpenTarget[]> {
     if (isTauri) {
@@ -100,38 +130,60 @@ export const backend = {
     }
     return false;
   },
-  async apply(agents: string[], libraryRoot?: string): Promise<ApplyOutcome> {
+  async apply(changes: ConnectionChange[], libraryRoot?: string): Promise<ApplyOutcome> {
     if (isTauri) {
-      return invoke("apply_rules", { agents, libraryRoot });
+      return invoke("apply_rules", { changes, libraryRoot });
     }
-    const selected = new Set(agents);
+    const requested = new Map(changes.map((change) => [change.agentId, change.connected]));
     const changed: string[] = [];
+    const before = structuredClone(demoSnapshot);
     demoSnapshot = {
       ...demoSnapshot,
       latestBackup: "demo-apply-snapshot",
       agents: demoSnapshot.agents.map((agent) => {
-        if (selected.has(agent.id) && agent.state !== "inSync") {
+        const connected = requested.get(agent.id);
+        if (connected !== undefined && connected !== agent.connected) {
           changed.push(agent.id);
-          return { ...agent, state: "inSync", detail: "Projection is current." };
+          return connected
+            ? {
+                ...agent,
+                mode: "symlink" as const,
+                state: "inSync" as const,
+                targetKind: "connectedLink" as const,
+                connected: true,
+                detail: "Linked directly to the canonical rules.",
+              }
+            : {
+                ...agent,
+                mode: "symlink" as const,
+                state: "ready" as const,
+                targetKind: "independentFile" as const,
+                connected: false,
+                detail: "Uses an independent native rules file.",
+              };
         }
         return agent;
       }),
     };
+    if (changed.length) demoRollbackSnapshot = before;
     return { changed, backupId: changed.length ? "demo-apply-snapshot" : undefined };
   },
   async rollback(libraryRoot?: string): Promise<RollbackOutcome> {
     if (isTauri) {
       return invoke("rollback_latest", { libraryRoot });
     }
-    demoSnapshot = {
-      ...demoSnapshot,
-      latestBackup: undefined,
-      agents: demoSnapshot.agents.map((agent) =>
-        agent.id === "opencode"
-          ? { ...agent, state: "ready", detail: "No target file yet." }
-          : agent,
-      ),
+    if (!demoRollbackSnapshot) throw new Error("No rollback snapshot is available");
+    const current = demoSnapshot;
+    demoSnapshot = { ...demoRollbackSnapshot, latestBackup: undefined };
+    demoRollbackSnapshot = undefined;
+    return {
+      restored: current.agents
+        .filter((agent) => {
+          const original = demoSnapshot.agents.find((candidate) => candidate.id === agent.id);
+          return original?.connected !== agent.connected;
+        })
+        .map((agent) => agent.targetPath),
+      backupId: "demo-apply-snapshot",
     };
-    return { restored: [demoSnapshot.agents[3].targetPath], backupId: "demo-apply-snapshot" };
   },
 };

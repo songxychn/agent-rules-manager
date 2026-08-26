@@ -1,6 +1,6 @@
 use arm_core::{
-    default_library_root, ApplyOutcome, ProjectionPlan, RollbackOutcome, RulesManager,
-    WorkspaceSnapshot,
+    default_library_root, ApplyOutcome, ConnectionChange, ProjectionPlan, RollbackOutcome,
+    RulesManager, WorkspaceSnapshot,
 };
 use std::env;
 use std::path::PathBuf;
@@ -45,10 +45,10 @@ fn initialize_library(app: AppHandle, library_root: Option<String>) -> Result<St
 fn preview_apply(
     app: AppHandle,
     library_root: Option<String>,
-    agents: Vec<String>,
+    changes: Vec<ConnectionChange>,
 ) -> Result<ProjectionPlan, String> {
     build_manager(&app, library_root)?
-        .plan(&agents)
+        .plan_connections(&changes)
         .map_err(|error| error.to_string())
 }
 
@@ -71,10 +71,10 @@ fn open_source(
 fn apply_rules(
     app: AppHandle,
     library_root: Option<String>,
-    agents: Vec<String>,
+    changes: Vec<ConnectionChange>,
 ) -> Result<ApplyOutcome, String> {
     build_manager(&app, library_root)?
-        .apply(&agents)
+        .apply_connections(&changes)
         .map_err(|error| error.to_string())
 }
 

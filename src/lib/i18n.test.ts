@@ -30,5 +30,6 @@ describe("i18n", () => {
     expect(translate("en", "notice.restored", { id: "snapshot-1" })).toBe(
       "Restored snapshot snapshot-1.",
     );
+    expect(translate("zh-CN", "rollback.tooltip")).toContain("不会修改规则源 AGENTS.md");
   });
 });

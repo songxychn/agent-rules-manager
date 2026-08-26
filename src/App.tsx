@@ -9,7 +9,12 @@ import {
   readPreferredOpenTarget,
   writePreferredOpenTarget,
 } from "./lib/openTargets";
-import type { OpenTarget, ProjectionPlan, WorkspaceSnapshot } from "./lib/types";
+import type {
+  ConnectionChange,
+  OpenTarget,
+  ProjectionPlan,
+  WorkspaceSnapshot,
+} from "./lib/types";
 import "./styles.css";
 
 type Notice = { tone: "success" | "error" | "info"; message: string };
@@ -19,13 +24,35 @@ function projectionFingerprint(snapshot: WorkspaceSnapshot | undefined): string 
   return JSON.stringify({
     sourcePath: snapshot.sourcePath,
     sourceExists: snapshot.sourceExists,
+    sourceDigest: snapshot.sourceDigest,
+    sourceModifiedAt: snapshot.sourceModifiedAt,
     agents: snapshot.agents.map((agent) => [
       agent.id,
       agent.targetPath,
       agent.mode,
       agent.state,
+      agent.targetKind,
+      agent.installed,
+      agent.connected,
     ]),
   });
+}
+
+function currentConnections(snapshot: WorkspaceSnapshot): Set<string> {
+  return new Set(snapshot.agents.filter((agent) => agent.connected).map((agent) => agent.id));
+}
+
+function connectionChanges(
+  snapshot: WorkspaceSnapshot,
+  desiredConnections: Set<string>,
+): ConnectionChange[] {
+  return snapshot.agents
+    .filter((agent) => agent.installed || agent.connected)
+    .filter((agent) => desiredConnections.has(agent.id) !== agent.connected)
+    .map((agent) => ({
+      agentId: agent.id,
+      connected: desiredConnections.has(agent.id),
+    }));
 }
 
 function App() {
@@ -35,6 +62,7 @@ function App() {
   const [libraryRoot, setLibraryRoot] = useState("");
   const [libraryInput, setLibraryInput] = useState("");
   const [plan, setPlan] = useState<ProjectionPlan>();
+  const [desiredConnections, setDesiredConnections] = useState<Set<string>>(new Set());
   const [openTargets, setOpenTargets] = useState<OpenTarget[]>([]);
   const [preferredOpenTarget, setPreferredOpenTarget] = useState(readPreferredOpenTarget);
   const [openingTargetId, setOpeningTargetId] = useState<string>();
@@ -51,6 +79,7 @@ function App() {
       setSnapshot(next);
       setLibraryRoot(next.libraryRoot);
       setLibraryInput(next.libraryRoot);
+      setDesiredConnections(currentConnections(next));
       setPlan(undefined);
     } catch (error) {
       setNotice({ tone: "error", message: String(error) });
@@ -84,7 +113,10 @@ function App() {
         snapshotRef.current = next;
         setSnapshot(next);
         setOpenTargets(nextOpenTargets);
-        if (projectionChanged) setPlan(undefined);
+        if (projectionChanged) {
+          setDesiredConnections(currentConnections(next));
+          setPlan(undefined);
+        }
       } catch (error) {
         setNotice({ tone: "error", message: String(error) });
       } finally {
@@ -105,12 +137,17 @@ function App() {
   }, [view]);
 
   const preview = async () => {
-    const agentIds = snapshotRef.current?.agents.map((agent) => agent.id) ?? [];
-    if (!agentIds.length) return;
+    const current = snapshotRef.current;
+    if (!current) return;
+    const changes = connectionChanges(current, desiredConnections);
+    if (!changes.length) {
+      setNotice({ tone: "info", message: t("notice.noConnectionChanges") });
+      return;
+    }
     setBusy("planning");
     setNotice(undefined);
     try {
-      setPlan(await backend.preview(agentIds, libraryRoot));
+      setPlan(await backend.preview(changes, libraryRoot));
     } catch (error) {
       setNotice({ tone: "error", message: String(error) });
     } finally {
@@ -145,13 +182,14 @@ function App() {
 
   const apply = async () => {
     if (!plan) return;
-    const affectedAgentIds = plan.steps
-      .filter((step) => step.action !== "none" && step.action !== "blocked")
-      .map((step) => step.agentId);
-    if (!affectedAgentIds.length) return;
+    const changes = plan.steps.map((step) => ({
+      agentId: step.agentId,
+      connected: step.desiredConnected,
+    }));
+    if (!changes.length) return;
     setBusy("applying");
     try {
-      const outcome = await backend.apply(affectedAgentIds, libraryRoot);
+      const outcome = await backend.apply(changes, libraryRoot);
       setNotice({
         tone: "success",
         message: outcome.changed.length
@@ -200,7 +238,9 @@ function App() {
     );
   }
 
-  const synced = snapshot.agents.filter((agent) => agent.state === "inSync").length;
+  const installed = snapshot.agents.filter((agent) => agent.installed || agent.connected);
+  const connected = installed.filter((agent) => agent.connected).length;
+  const pendingChanges = connectionChanges(snapshot, desiredConnections);
 
   return (
     <div className="app-shell">
@@ -237,10 +277,14 @@ function App() {
         <div className="sidebar-readout">
           <div>
             <span>{t("readout.paths")}</span>
-            <strong>{synced}/{snapshot.agents.length}</strong>
+            <strong>{connected}/{installed.length}</strong>
           </div>
           <span className="alignment-track" aria-hidden="true">
-            <span style={{ width: `${(synced / snapshot.agents.length) * 100}%` }} />
+            <span
+              style={{
+                width: `${installed.length ? (connected / installed.length) * 100 : 0}%`,
+              }}
+            />
           </span>
           <small>{t("readout.aligned")}</small>
         </div>
@@ -259,7 +303,7 @@ function App() {
         <header className="topbar">
           <div className="page-heading">
             <h1>{view === "settings" ? t("nav.settings") : t("nav.control")}</h1>
-            {view === "control" && <span>{snapshot.agents.length}</span>}
+            {view === "control" && <span>{installed.length}</span>}
           </div>
         <div className="library-loader">
           <label htmlFor="library-root">{t("library.label")}</label>
@@ -289,6 +333,7 @@ function App() {
             className="button button-ghost button-small"
             disabled={!snapshot.latestBackup || Boolean(busy)}
             onClick={() => void rollback()}
+            title={t("rollback.tooltip")}
           >
             <AppIcon name="rollback" />
             {busy === "rollback" ? t("rollback.restoring") : t("rollback.latest")}
@@ -329,8 +374,19 @@ function App() {
               agents={snapshot.agents}
               sourceDigest={snapshot.sourceDigest}
               plan={plan}
+              desiredConnections={desiredConnections}
+              pendingCount={pendingChanges.length}
               loading={busy === "planning"}
               applying={busy === "applying"}
+              onToggle={(agentId, nextConnected) => {
+                setDesiredConnections((current) => {
+                  const next = new Set(current);
+                  if (nextConnected) next.add(agentId);
+                  else next.delete(agentId);
+                  return next;
+                });
+                setPlan(undefined);
+              }}
               onInspect={() => void preview()}
               onApply={() => void apply()}
             />

@@ -1,4 +1,6 @@
-use arm_core::{default_library_root, default_state_root, ArmError, RulesManager};
+use arm_core::{
+    default_library_root, default_state_root, ArmError, ConnectionChange, RulesManager,
+};
 use clap::{Parser, Subcommand};
 use std::env;
 use std::path::PathBuf;
@@ -35,6 +37,9 @@ enum Command {
     Plan {
         #[arg(long, value_delimiter = ',')]
         agents: Vec<String>,
+        /// Preview making the selected agents independent instead of connecting them.
+        #[arg(long)]
+        disconnect: bool,
         #[arg(long)]
         json: bool,
     },
@@ -42,6 +47,9 @@ enum Command {
     Apply {
         #[arg(long, value_delimiter = ',')]
         agents: Vec<String>,
+        /// Materialize independent native files for the selected connected agents.
+        #[arg(long)]
+        disconnect: bool,
         #[arg(long)]
         json: bool,
     },
@@ -80,12 +88,34 @@ fn run() -> Result<(), ArmError> {
             } else {
                 println!("Source: {}", snapshot.source_path);
                 for agent in snapshot.agents {
-                    println!("{:<12} {:?}  {}", agent.id, agent.state, agent.target_path);
+                    println!(
+                        "{:<12} {:<12} {:<12} {}",
+                        agent.id,
+                        if agent.installed {
+                            "installed"
+                        } else {
+                            "not-detected"
+                        },
+                        if agent.connected {
+                            "connected"
+                        } else {
+                            "independent"
+                        },
+                        agent.target_path
+                    );
                 }
             }
         }
-        Command::Plan { agents, json } => {
-            let plan = manager.plan(&agents)?;
+        Command::Plan {
+            agents,
+            disconnect,
+            json,
+        } => {
+            let plan = if disconnect {
+                manager.plan_connections(&connection_changes(&agents, false))?
+            } else {
+                manager.plan(&agents)?
+            };
             if json {
                 println!("{}", serde_json::to_string_pretty(&plan)?);
             } else {
@@ -102,12 +132,20 @@ fn run() -> Result<(), ArmError> {
                 );
             }
         }
-        Command::Apply { agents, json } => {
-            let outcome = manager.apply(&agents)?;
+        Command::Apply {
+            agents,
+            disconnect,
+            json,
+        } => {
+            let outcome = if disconnect {
+                manager.apply_connections(&connection_changes(&agents, false))?
+            } else {
+                manager.apply(&agents)?
+            };
             if json {
                 println!("{}", serde_json::to_string_pretty(&outcome)?);
             } else if outcome.changed.is_empty() {
-                println!("Already in sync.");
+                println!("No connection changes were needed.");
             } else {
                 println!("Applied to {}.", outcome.changed.join(", "));
                 if let Some(backup) = outcome.backup_id {
@@ -128,4 +166,14 @@ fn run() -> Result<(), ArmError> {
         }
     }
     Ok(())
+}
+
+fn connection_changes(agents: &[String], connected: bool) -> Vec<ConnectionChange> {
+    agents
+        .iter()
+        .map(|agent_id| ConnectionChange {
+            agent_id: agent_id.clone(),
+            connected,
+        })
+        .collect()
 }

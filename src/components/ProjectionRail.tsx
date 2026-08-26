@@ -6,8 +6,11 @@ interface ProjectionRailProps {
   agents: AgentStatus[];
   sourceDigest?: string;
   plan?: ProjectionPlan;
+  desiredConnections: Set<string>;
+  pendingCount: number;
   loading: boolean;
   applying: boolean;
+  onToggle: (agentId: string, connected: boolean) => void;
   onInspect: () => void;
   onApply: () => void;
 }
@@ -16,38 +19,48 @@ export function ProjectionRail({
   agents,
   sourceDigest,
   plan,
+  desiredConnections,
+  pendingCount,
   loading,
   applying,
+  onToggle,
   onInspect,
   onApply,
 }: ProjectionRailProps) {
   const { t } = useI18n();
-  const attentionCount = agents.filter((agent) => agent.state !== "inSync").length;
-  const conflictCount = agents.filter((agent) => agent.state === "conflict").length;
+  const detectedAgents = agents.filter((agent) => agent.installed || agent.connected);
+  const connectedCount = detectedAgents.filter((agent) => agent.connected).length;
+  const conflictCount = detectedAgents.filter((agent) => agent.state === "conflict").length;
+  const orderedAgents = [...agents].sort(
+    (left, right) => Number(right.installed || right.connected) - Number(left.installed || left.connected),
+  );
 
   const stepSummary = (action: string) => {
     if (action === "blocked") return t("projection.step.conflict");
-    if (action === "addInclude") return t("projection.step.addInclude");
     if (action === "createLink") return t("projection.step.createLink");
-    if (action === "refreshManagedBlock") {
-      return t("projection.step.refreshManagedBlock");
-    }
+    if (action === "createIndependentFile") return t("projection.step.createIndependentFile");
+    if (action === "detachManagedInclude") return t("projection.step.detachManagedInclude");
+    if (action === "migrateLegacyInclude") return t("projection.step.migrateLegacyInclude");
     return t("projection.step.change");
   };
 
-  let statusTone = "success";
-  let statusTitle = t("projection.syncActiveTitle");
-  let statusBody = t("projection.syncActiveBody");
+  const targetDetail = (agent: AgentStatus) => {
+    if (agent.targetKind === "missing") return t("projection.detail.missing");
+    if (agent.targetKind === "connectedLink") return t("projection.detail.connectedLink");
+    if (agent.targetKind === "independentFile") return t("projection.detail.independentFile");
+    if (agent.targetKind === "legacyInclude") return t("projection.detail.legacyInclude");
+    if (agent.targetKind === "foreignLink") return t("projection.detail.foreignLink");
+    return t("projection.detail.invalidManagedFile");
+  };
 
-  if (!plan && conflictCount > 0) {
-    statusTone = "danger";
-    statusTitle = t("projection.conflictDetectedTitle", { count: conflictCount });
-    statusBody = t("projection.conflictDetectedBody");
-  } else if (!plan && attentionCount > 0) {
-    statusTone = "attention";
-    statusTitle = t("projection.attentionTitle", { count: attentionCount });
-    statusBody = t("projection.attentionBody");
-  } else if (plan?.blocked) {
+  let statusTone = "success";
+  let statusTitle = t("projection.detectedTitle", {
+    detected: detectedAgents.length,
+    connected: connectedCount,
+  });
+  let statusBody = t("projection.detectedBody");
+
+  if (plan?.blocked) {
     statusTone = "danger";
     statusTitle = t("projection.blockedTitle");
     statusBody = t("projection.blockedBody");
@@ -55,6 +68,18 @@ export function ProjectionRail({
     statusTone = "attention";
     statusTitle = t("projection.connectionChangesReady", { count: plan.changeCount });
     statusBody = t("projection.connectionChangesBody");
+  } else if (pendingCount > 0) {
+    statusTone = "attention";
+    statusTitle = t("projection.selectionPendingTitle", { count: pendingCount });
+    statusBody = t("projection.selectionPendingBody");
+  } else if (conflictCount > 0) {
+    statusTone = "danger";
+    statusTitle = t("projection.conflictDetectedTitle", { count: conflictCount });
+    statusBody = t("projection.conflictDetectedBody");
+  } else if (detectedAgents.length === 0) {
+    statusTone = "attention";
+    statusTitle = t("projection.noneDetectedTitle");
+    statusBody = t("projection.noneDetectedBody");
   }
 
   return (
@@ -81,12 +106,27 @@ export function ProjectionRail({
         </div>
 
         <ul className="rail-stack" aria-label={t("projection.targets")}>
-          {agents.map((agent) => {
+          {orderedAgents.map((agent) => {
+            const available = agent.installed || agent.connected;
+            const desiredConnected = desiredConnections.has(agent.id);
+            const pending = desiredConnected !== agent.connected;
             const step = plan?.steps.find((candidate) => candidate.agentId === agent.id);
             const previewedAction = step && step.action !== "none";
+            const connectionLabel = !available
+              ? t("projection.notDetected")
+              : desiredConnected
+                ? t("projection.centralLink")
+                : agent.targetKind === "missing"
+                  ? t("projection.independentEmpty")
+                  : t("projection.independentFile");
 
             return (
-              <li className={`agent-rail rail-${agent.state}`} key={agent.id}>
+              <li
+                className={`agent-rail rail-${agent.state} ${pending ? "is-pending" : ""} ${
+                  available ? "" : "is-unavailable"
+                }`}
+                key={agent.id}
+              >
                 <span className="rail-line" aria-hidden="true">
                   <span className="rail-flow" />
                 </span>
@@ -97,13 +137,15 @@ export function ProjectionRail({
                   <span className="agent-copy">
                     <span className="agent-title-row">
                       <strong>{agent.label}</strong>
+                      {available && (
+                        <span className="detected-badge" title={agent.detectionDetail}>
+                          {t("projection.detected")}
+                        </span>
+                      )}
                     </span>
                     <code title={agent.targetPath}>{agent.targetPath}</code>
-                    <small className="agent-mode">
-                      {agent.mode === "include"
-                        ? t("projection.managedInclude")
-                        : t("projection.symbolicLink")}
-                    </small>
+                    <small className="agent-mode">{connectionLabel}</small>
+                    {available && <small className="agent-detail">{targetDetail(agent)}</small>}
                     {previewedAction && (
                       <small className={`agent-action-preview action-${step.action}`}>
                         {stepSummary(step.action)}
@@ -111,7 +153,21 @@ export function ProjectionRail({
                     )}
                   </span>
                   <span className="agent-node-side">
-                    <StatusPill state={agent.state} />
+                    <StatusPill state={available ? agent.state : "unavailable"} />
+                    <button
+                      type="button"
+                      className={`connection-switch ${desiredConnected ? "is-on" : ""}`}
+                      role="switch"
+                      aria-checked={desiredConnected}
+                      aria-label={t("projection.toggleLabel", { agent: agent.label })}
+                      disabled={!available || loading || applying}
+                      onClick={() => onToggle(agent.id, !desiredConnected)}
+                    >
+                      <span className="switch-track" aria-hidden="true">
+                        <span className="switch-knob" />
+                      </span>
+                      <span>{desiredConnected ? t("projection.joined") : t("projection.independent")}</span>
+                    </button>
                   </span>
                 </article>
               </li>
@@ -120,10 +176,7 @@ export function ProjectionRail({
         </ul>
       </div>
 
-      <footer
-        className={`projection-status-bar tone-${statusTone}`}
-        aria-live="polite"
-      >
+      <footer className={`projection-status-bar tone-${statusTone}`} aria-live="polite">
         <span className="projection-status-glyph" aria-hidden="true">
           {statusTone === "success" ? "✓" : statusTone === "danger" ? "!" : "↗"}
         </span>
@@ -131,7 +184,7 @@ export function ProjectionRail({
           <strong>{statusTitle}</strong>
           <span>{statusBody}</span>
         </span>
-        {attentionCount > 0 && (
+        {pendingCount > 0 && (
           <span className="projection-status-actions">
             <button
               className="button button-secondary button-small"
@@ -153,8 +206,8 @@ export function ProjectionRail({
                 {applying
                   ? t("projection.applying")
                   : plan.changeCount === 1
-                    ? t("projection.connectOne")
-                    : t("projection.connectMany", { count: plan.changeCount })}
+                    ? t("projection.applyOne")
+                    : t("projection.applyMany", { count: plan.changeCount })}
               </button>
             )}
           </span>
