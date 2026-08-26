@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppIcon, BrandMark } from "./components/AppIcon";
 import { ProjectionRail } from "./components/ProjectionRail";
 import { SettingsPage } from "./components/SettingsPage";
-import { SourceFilePanel } from "./components/SourceFilePanel";
+import { SourceOpenControl } from "./components/SourceOpenControl";
 import { backend } from "./lib/backend";
 import { useI18n } from "./lib/i18n";
 import {
@@ -38,7 +38,6 @@ function App() {
   const [openTargets, setOpenTargets] = useState<OpenTarget[]>([]);
   const [preferredOpenTarget, setPreferredOpenTarget] = useState(readPreferredOpenTarget);
   const [openingTargetId, setOpeningTargetId] = useState<string>();
-  const [refreshing, setRefreshing] = useState(false);
   const [busy, setBusy] = useState<"loading" | "planning" | "applying" | "rollback">();
   const [notice, setNotice] = useState<Notice>();
   const snapshotRef = useRef<WorkspaceSnapshot>();
@@ -72,10 +71,9 @@ function App() {
   }, []);
 
   const refreshWorkspace = useCallback(
-    async (announce: boolean) => {
+    async () => {
       if (!libraryRoot || refreshInFlight.current) return;
       refreshInFlight.current = true;
-      setRefreshing(true);
       try {
         const [next, nextOpenTargets] = await Promise.all([
           backend.snapshot(libraryRoot),
@@ -87,21 +85,17 @@ function App() {
         setSnapshot(next);
         setOpenTargets(nextOpenTargets);
         if (projectionChanged) setPlan(undefined);
-        if (announce) {
-          setNotice({ tone: "success", message: t("notice.sourceRefreshed") });
-        }
       } catch (error) {
         setNotice({ tone: "error", message: String(error) });
       } finally {
         refreshInFlight.current = false;
-        setRefreshing(false);
       }
     },
-    [libraryRoot, t],
+    [libraryRoot],
   );
 
   useEffect(() => {
-    const refreshOnFocus = () => void refreshWorkspace(false);
+    const refreshOnFocus = () => void refreshWorkspace();
     window.addEventListener("focus", refreshOnFocus);
     return () => window.removeEventListener("focus", refreshOnFocus);
   }, [refreshWorkspace]);
@@ -299,6 +293,14 @@ function App() {
             <AppIcon name="rollback" />
             {busy === "rollback" ? t("rollback.restoring") : t("rollback.latest")}
           </button>
+          {view === "control" && snapshot.sourceExists && (
+            <SourceOpenControl
+              targets={openTargets}
+              preferredTargetId={preferredOpenTarget}
+              openingTargetId={openingTargetId}
+              onOpen={(targetId) => void openSource(targetId)}
+            />
+          )}
         </div>
         </header>
 
@@ -332,20 +334,6 @@ function App() {
               onInspect={() => void preview()}
               onApply={() => void apply()}
             />
-
-            <div className="workbench-grid">
-              <SourceFilePanel
-                sourcePath={snapshot.sourcePath}
-                sourceDigest={snapshot.sourceDigest}
-                sourceModifiedAt={snapshot.sourceModifiedAt}
-                targets={openTargets}
-                preferredTargetId={preferredOpenTarget}
-                openingTargetId={openingTargetId}
-                refreshing={refreshing}
-                onOpen={(targetId) => void openSource(targetId)}
-                onRefresh={() => void refreshWorkspace(true)}
-              />
-            </div>
           </>
         )}
         </main>
