@@ -4,10 +4,16 @@ import type { WorkspaceSnapshot } from "./types";
 
 const snapshot: WorkspaceSnapshot = {
   libraryRoot: "/home/me/.agent-rules",
-  sourcePath: "/home/me/.agent-rules/AGENTS.md",
+  libraryState: "ready",
+  libraryDetail: "Current",
+  runtimeState: "current",
+  sourcePath: "/home/me/.agent-rules/current/AGENTS.md",
   sourceExists: true,
   sourceDigest: "abc123",
   sourceModifiedAt: "2026-08-26T08:00:00Z",
+  activeProfileId: "default",
+  packs: [],
+  profiles: [],
   agents: [
     {
       id: "codex",
@@ -78,5 +84,28 @@ describe("buildProjectionPlan", () => {
       "createLink",
       "createIndependentFile",
     ]);
+  });
+
+  it("repairs a connected legacy link without toggling it off first", () => {
+    const legacySnapshot: WorkspaceSnapshot = {
+      ...snapshot,
+      agents: [
+        {
+          ...snapshot.agents[0],
+          state: "drifted",
+          targetKind: "legacyLink",
+          connected: true,
+          detail: "Still points to the migrated root rules path.",
+        },
+      ],
+    };
+
+    const plan = buildProjectionPlan(legacySnapshot, [
+      { agentId: "codex", connected: true },
+    ]);
+
+    expect(plan.blocked).toBe(false);
+    expect(plan.changeCount).toBe(1);
+    expect(plan.steps[0].action).toBe("replaceLegacyLink");
   });
 });

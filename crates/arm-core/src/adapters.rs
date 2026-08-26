@@ -35,7 +35,7 @@ pub fn default_adapters(home: &Path) -> Vec<AgentAdapter> {
             label: "Claude Code".into(),
             target_path: home.join(".claude/CLAUDE.md"),
             mode: DeployMode::Symlink,
-            note: "Direct link to the neutral rules source.".into(),
+            note: "Stable link to the machine-local current Profile.".into(),
             command_names: vec!["claude".into()],
             detection_paths: detection_paths(home, "claude", home.join(".claude")),
         },
@@ -44,7 +44,7 @@ pub fn default_adapters(home: &Path) -> Vec<AgentAdapter> {
             label: "Codex".into(),
             target_path: home.join(".codex/AGENTS.md"),
             mode: DeployMode::Symlink,
-            note: "Direct link to the neutral rules source.".into(),
+            note: "Stable link to the machine-local current Profile.".into(),
             command_names: vec!["codex".into()],
             detection_paths: {
                 let mut paths = detection_paths(home, "codex", home.join(".codex"));
@@ -57,7 +57,7 @@ pub fn default_adapters(home: &Path) -> Vec<AgentAdapter> {
             label: "Grok".into(),
             target_path: home.join(".grok/AGENTS.md"),
             mode: DeployMode::Symlink,
-            note: "Direct link to the neutral rules source.".into(),
+            note: "Stable link to the machine-local current Profile.".into(),
             command_names: vec!["grok".into()],
             detection_paths: detection_paths(home, "grok", home.join(".grok")),
         },
@@ -66,7 +66,7 @@ pub fn default_adapters(home: &Path) -> Vec<AgentAdapter> {
             label: "OpenCode".into(),
             target_path: opencode_root.join("AGENTS.md"),
             mode: DeployMode::Symlink,
-            note: "Direct link to the neutral rules source.".into(),
+            note: "Stable link to the machine-local current Profile.".into(),
             command_names: vec!["opencode".into()],
             detection_paths: {
                 let mut paths = detection_paths(home, "opencode", opencode_root);
@@ -80,7 +80,7 @@ pub fn default_adapters(home: &Path) -> Vec<AgentAdapter> {
             label: "Qwen Code".into(),
             target_path: qwen_root.join("QWEN.md"),
             mode: DeployMode::Symlink,
-            note: "Direct link to the neutral rules source.".into(),
+            note: "Stable link to the machine-local current Profile.".into(),
             command_names: vec!["qwen".into()],
             detection_paths: detection_paths(home, "qwen", qwen_root),
         },

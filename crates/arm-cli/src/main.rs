@@ -1,7 +1,9 @@
 use arm_core::{
-    default_library_root, default_state_root, ArmError, ConnectionChange, RulesManager,
+    default_library_root, default_state_root, ArmError, ConnectionChange, LibraryMutationOutcome,
+    LibraryPlan, RulesManager,
 };
 use clap::{Parser, Subcommand};
+use serde::Serialize;
 use std::env;
 use std::path::PathBuf;
 
@@ -9,14 +11,14 @@ use std::path::PathBuf;
 #[command(
     name = "agent-rules",
     version,
-    about = "Safely project one neutral rules source into multiple coding agents"
+    about = "Compose Rule Packs into machine-local profiles and project them safely"
 )]
 struct Cli {
-    /// Override the canonical rules library directory.
+    /// Override the versioned rule library directory.
     #[arg(long, global = true)]
     root: Option<PathBuf>,
 
-    /// Override the local state and backup directory.
+    /// Override the machine-local state and backup directory.
     #[arg(long, global = true)]
     state_root: Option<PathBuf>,
 
@@ -26,14 +28,30 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Create the canonical AGENTS.md when it is missing.
-    Init,
-    /// Inspect every supported target without changing files.
+    /// Preview or initialize the Rule Pack library.
+    Init {
+        /// Apply the previewed initialization plan.
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Inspect the library, active profile, runtime, and agent targets.
     Status {
         #[arg(long)]
         json: bool,
     },
-    /// Preview exactly what apply would change.
+    /// Manage syncable Rule Packs.
+    Packs {
+        #[command(subcommand)]
+        command: PackCommand,
+    },
+    /// Manage syncable Profiles and the local active selection.
+    Profiles {
+        #[command(subcommand)]
+        command: ProfileCommand,
+    },
+    /// Preview exactly what agent projection would change.
     Plan {
         #[arg(long, value_delimiter = ',')]
         agents: Vec<String>,
@@ -43,7 +61,7 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Apply the current plan after refusing unmanaged conflicts.
+    /// Apply the current agent projection plan after refusing unmanaged conflicts.
     Apply {
         #[arg(long, value_delimiter = ',')]
         agents: Vec<String>,
@@ -53,7 +71,73 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Restore the latest apply if none of its targets drifted afterward.
+    /// Restore the latest agent projection if none of its targets drifted.
+    Rollback {
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum PackCommand {
+    /// List every Rule Pack and its ordered Markdown instruction files.
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview or create a Rule Pack with a required AGENTS.md.
+    Create {
+        id: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value = "")]
+        description: String,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview or append a supplemental Markdown source to a Rule Pack.
+    AddFile {
+        pack_id: String,
+        relative_path: String,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+enum ProfileCommand {
+    /// List every Profile in the library and the local active selection.
+    List {
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview or create an ordered composition of Rule Packs.
+    Create {
+        id: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long, default_value = "")]
+        description: String,
+        #[arg(long, value_delimiter = ',', required = true)]
+        packs: Vec<String>,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview or activate a Profile only on this machine.
+    Activate {
+        id: String,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Restore the latest library mutation or local Profile switch.
     Rollback {
         #[arg(long)]
         json: bool,
@@ -77,16 +161,26 @@ fn run() -> Result<(), ArmError> {
     let manager = RulesManager::new(root, state_root, &home);
 
     match cli.command {
-        Command::Init => {
-            let path = manager.initialize()?;
-            println!("Initialized {}", path.display());
+        Command::Init { apply, json } => {
+            if apply {
+                print_mutation(manager.initialize()?, json)?;
+            } else {
+                print_library_plan(manager.plan_initialize()?, json)?;
+            }
         }
         Command::Status { json } => {
             let snapshot = manager.snapshot()?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&snapshot)?);
+                print_json(&snapshot)?;
             } else {
-                println!("Source: {}", snapshot.source_path);
+                println!("Library: {} ({:?})", snapshot.library_root, snapshot.library_state);
+                println!("Runtime: {:?}", snapshot.runtime_state);
+                println!(
+                    "Active profile: {}",
+                    snapshot.active_profile_id.as_deref().unwrap_or("not selected")
+                );
+                println!("Entrypoint: {}", snapshot.source_path);
+                println!("Rule Packs: {}  Profiles: {}", snapshot.packs.len(), snapshot.profiles.len());
                 for agent in snapshot.agents {
                     println!(
                         "{:<12} {:<12} {:<12} {}",
@@ -106,6 +200,108 @@ fn run() -> Result<(), ArmError> {
                 }
             }
         }
+        Command::Packs { command } => match command {
+            PackCommand::List { json } => {
+                let packs = manager.snapshot()?.packs;
+                if json {
+                    print_json(&packs)?;
+                } else {
+                    for pack in packs {
+                        println!("{}  {}", pack.id, pack.name);
+                        for file in pack.files {
+                            println!("  {}  {}", file.digest, file.path);
+                        }
+                    }
+                }
+            }
+            PackCommand::Create {
+                id,
+                name,
+                description,
+                apply,
+                json,
+            } => {
+                if apply {
+                    print_mutation(manager.create_pack(&id, &name, &description)?, json)?;
+                } else {
+                    print_library_plan(
+                        manager.plan_create_pack(&id, &name, &description)?,
+                        json,
+                    )?;
+                }
+            }
+            PackCommand::AddFile {
+                pack_id,
+                relative_path,
+                apply,
+                json,
+            } => {
+                if apply {
+                    print_mutation(manager.add_pack_file(&pack_id, &relative_path)?, json)?;
+                } else {
+                    print_library_plan(
+                        manager.plan_add_pack_file(&pack_id, &relative_path)?,
+                        json,
+                    )?;
+                }
+            }
+        },
+        Command::Profiles { command } => match command {
+            ProfileCommand::List { json } => {
+                let profiles = manager.snapshot()?.profiles;
+                if json {
+                    print_json(&profiles)?;
+                } else {
+                    for profile in profiles {
+                        println!(
+                            "{}{}  {}  [{}]",
+                            if profile.is_active { "* " } else { "  " },
+                            profile.id,
+                            profile.name,
+                            profile.pack_ids.join(" -> ")
+                        );
+                    }
+                }
+            }
+            ProfileCommand::Create {
+                id,
+                name,
+                description,
+                packs,
+                apply,
+                json,
+            } => {
+                if apply {
+                    print_mutation(
+                        manager.create_profile(&id, &name, &description, &packs)?,
+                        json,
+                    )?;
+                } else {
+                    print_library_plan(
+                        manager.plan_create_profile(&id, &name, &description, &packs)?,
+                        json,
+                    )?;
+                }
+            }
+            ProfileCommand::Activate { id, apply, json } => {
+                if apply {
+                    print_mutation(manager.activate_profile(&id)?, json)?;
+                } else {
+                    print_library_plan(manager.plan_activate_profile(&id)?, json)?;
+                }
+            }
+            ProfileCommand::Rollback { json } => {
+                let outcome = manager.rollback_library_latest()?;
+                if json {
+                    print_json(&outcome)?;
+                } else {
+                    println!("Restored library snapshot {}.", outcome.backup_id);
+                    for target in outcome.restored {
+                        println!("  {target}");
+                    }
+                }
+            }
+        },
         Command::Plan {
             agents,
             disconnect,
@@ -117,7 +313,7 @@ fn run() -> Result<(), ArmError> {
                 manager.plan(&agents)?
             };
             if json {
-                println!("{}", serde_json::to_string_pretty(&plan)?);
+                print_json(&plan)?;
             } else {
                 for step in &plan.steps {
                     println!(
@@ -143,7 +339,7 @@ fn run() -> Result<(), ArmError> {
                 manager.apply(&agents)?
             };
             if json {
-                println!("{}", serde_json::to_string_pretty(&outcome)?);
+                print_json(&outcome)?;
             } else if outcome.changed.is_empty() {
                 println!("No connection changes were needed.");
             } else {
@@ -156,9 +352,9 @@ fn run() -> Result<(), ArmError> {
         Command::Rollback { json } => {
             let outcome = manager.rollback_latest()?;
             if json {
-                println!("{}", serde_json::to_string_pretty(&outcome)?);
+                print_json(&outcome)?;
             } else {
-                println!("Restored snapshot {}.", outcome.backup_id);
+                println!("Restored projection snapshot {}.", outcome.backup_id);
                 for target in outcome.restored {
                     println!("  {target}");
                 }
@@ -176,4 +372,45 @@ fn connection_changes(agents: &[String], connected: bool) -> Vec<ConnectionChang
             connected,
         })
         .collect()
+}
+
+fn print_library_plan(plan: LibraryPlan, json: bool) -> Result<(), ArmError> {
+    if json {
+        print_json(&plan)
+    } else {
+        println!("{}", plan.summary);
+        for step in plan.steps {
+            println!("  {:<20} {}", step.action, step.path);
+            println!("    {}", step.summary);
+        }
+        println!(
+            "{} change(s){}; rerun with --apply to confirm.",
+            plan.change_count,
+            if plan.blocked { ", blocked" } else { "" }
+        );
+        Ok(())
+    }
+}
+
+fn print_mutation(outcome: LibraryMutationOutcome, json: bool) -> Result<(), ArmError> {
+    if json {
+        print_json(&outcome)
+    } else if outcome.changed.is_empty() {
+        println!("Already current.");
+        Ok(())
+    } else {
+        println!("Changed {} path(s).", outcome.changed.len());
+        for path in outcome.changed {
+            println!("  {path}");
+        }
+        if let Some(backup) = outcome.backup_id {
+            println!("Library rollback snapshot: {backup}");
+        }
+        Ok(())
+    }
+}
+
+fn print_json<T: Serialize>(value: &T) -> Result<(), ArmError> {
+    println!("{}", serde_json::to_string_pretty(value)?);
+    Ok(())
 }

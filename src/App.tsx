@@ -1,31 +1,44 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppIcon, BrandMark } from "./components/AppIcon";
+import { LibrarySetupPanel } from "./components/LibrarySetupPanel";
+import { ProfilesPage } from "./components/ProfilesPage";
 import { ProjectionRail } from "./components/ProjectionRail";
+import { RulePacksPage } from "./components/RulePacksPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { SourceOpenControl } from "./components/SourceOpenControl";
 import { backend } from "./lib/backend";
 import { useI18n } from "./lib/i18n";
-import {
-  readPreferredOpenTarget,
-  writePreferredOpenTarget,
-} from "./lib/openTargets";
+import { readPreferredOpenTarget, writePreferredOpenTarget } from "./lib/openTargets";
 import type {
   ConnectionChange,
+  LibraryPlan,
   OpenTarget,
+  PackDraft,
+  PackFileDraft,
+  ProfileDraft,
   ProjectionPlan,
   WorkspaceSnapshot,
 } from "./lib/types";
 import "./styles.css";
 
+type View = "control" | "packs" | "profiles" | "settings";
 type Notice = { tone: "success" | "error" | "info"; message: string };
 
-function projectionFingerprint(snapshot: WorkspaceSnapshot | undefined): string {
+function workspaceFingerprint(snapshot: WorkspaceSnapshot | undefined): string {
   if (!snapshot) return "";
   return JSON.stringify({
+    libraryState: snapshot.libraryState,
+    runtimeState: snapshot.runtimeState,
+    activeProfileId: snapshot.activeProfileId,
     sourcePath: snapshot.sourcePath,
     sourceExists: snapshot.sourceExists,
     sourceDigest: snapshot.sourceDigest,
     sourceModifiedAt: snapshot.sourceModifiedAt,
+    packs: snapshot.packs.map((pack) => [
+      pack.id,
+      pack.files.map((file) => [file.path, file.digest]),
+    ]),
+    profiles: snapshot.profiles.map((profile) => [profile.id, profile.packIds, profile.isActive]),
     agents: snapshot.agents.map((agent) => [
       agent.id,
       agent.targetPath,
@@ -48,7 +61,11 @@ function connectionChanges(
 ): ConnectionChange[] {
   return snapshot.agents
     .filter((agent) => agent.installed || agent.connected)
-    .filter((agent) => desiredConnections.has(agent.id) !== agent.connected)
+    .filter(
+      (agent) =>
+        desiredConnections.has(agent.id) !== agent.connected ||
+        (desiredConnections.has(agent.id) && agent.state === "drifted"),
+    )
     .map((agent) => ({
       agentId: agent.id,
       connected: desiredConnections.has(agent.id),
@@ -57,16 +74,17 @@ function connectionChanges(
 
 function App() {
   const { t } = useI18n();
-  const [view, setView] = useState<"control" | "settings">("control");
+  const [view, setView] = useState<View>("control");
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
   const [libraryRoot, setLibraryRoot] = useState("");
   const [libraryInput, setLibraryInput] = useState("");
   const [plan, setPlan] = useState<ProjectionPlan>();
+  const [setupPlan, setSetupPlan] = useState<LibraryPlan>();
   const [desiredConnections, setDesiredConnections] = useState<Set<string>>(new Set());
   const [openTargets, setOpenTargets] = useState<OpenTarget[]>([]);
   const [preferredOpenTarget, setPreferredOpenTarget] = useState(readPreferredOpenTarget);
   const [openingTargetId, setOpeningTargetId] = useState<string>();
-  const [busy, setBusy] = useState<"loading" | "planning" | "applying" | "rollback">();
+  const [busy, setBusy] = useState<string>();
   const [notice, setNotice] = useState<Notice>();
   const snapshotRef = useRef<WorkspaceSnapshot>();
   const refreshInFlight = useRef(false);
@@ -81,6 +99,7 @@ function App() {
       setLibraryInput(next.libraryRoot);
       setDesiredConnections(currentConnections(next));
       setPlan(undefined);
+      setSetupPlan(undefined);
     } catch (error) {
       setNotice({ tone: "error", message: String(error) });
     } finally {
@@ -108,14 +127,14 @@ function App() {
           backend.snapshot(libraryRoot),
           backend.openTargets(),
         ]);
-        const projectionChanged =
-          projectionFingerprint(snapshotRef.current) !== projectionFingerprint(next);
+        const changed = workspaceFingerprint(snapshotRef.current) !== workspaceFingerprint(next);
         snapshotRef.current = next;
         setSnapshot(next);
         setOpenTargets(nextOpenTargets);
-        if (projectionChanged) {
+        if (changed) {
           setDesiredConnections(currentConnections(next));
           setPlan(undefined);
+          setSetupPlan(undefined);
         }
       } catch (error) {
         setNotice({ tone: "error", message: String(error) });
@@ -136,7 +155,7 @@ function App() {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [view]);
 
-  const preview = async () => {
+  const previewProjection = async () => {
     const current = snapshotRef.current;
     if (!current) return;
     const changes = connectionChanges(current, desiredConnections);
@@ -155,32 +174,7 @@ function App() {
     }
   };
 
-  const openSource = async (targetId: string) => {
-    const target = openTargets.find((candidate) => candidate.id === targetId);
-    if (!target) return;
-    setPreferredOpenTarget(targetId);
-    writePreferredOpenTarget(targetId);
-    setOpeningTargetId(targetId);
-    try {
-      const opened = await backend.openSource(targetId, libraryRoot);
-      setNotice(
-        opened
-          ? {
-              tone: "success",
-              message: t("notice.sourceOpened", {
-                app: target.id === "default" ? t("source.open.default") : target.label,
-              }),
-            }
-          : { tone: "info", message: t("notice.demoOpen") },
-      );
-    } catch (error) {
-      setNotice({ tone: "error", message: String(error) });
-    } finally {
-      setOpeningTargetId(undefined);
-    }
-  };
-
-  const apply = async () => {
+  const applyProjection = async () => {
     if (!plan) return;
     const changes = plan.steps.map((step) => ({
       agentId: step.agentId,
@@ -204,7 +198,7 @@ function App() {
     }
   };
 
-  const rollback = async () => {
+  const rollbackProjection = async () => {
     setBusy("rollback");
     try {
       const outcome = await backend.rollback(libraryRoot);
@@ -217,8 +211,19 @@ function App() {
     }
   };
 
+  const previewInitialize = async () => {
+    setBusy("planning-library");
+    try {
+      setSetupPlan(await backend.previewInitialize(libraryRoot || undefined));
+    } catch (error) {
+      setNotice({ tone: "error", message: String(error) });
+    } finally {
+      setBusy(undefined);
+    }
+  };
+
   const initialize = async () => {
-    setBusy("loading");
+    setBusy("initializing");
     try {
       await backend.initialize(libraryRoot || undefined);
       await loadSnapshot(libraryRoot || undefined);
@@ -227,6 +232,73 @@ function App() {
       setNotice({ tone: "error", message: String(error) });
       setBusy(undefined);
     }
+  };
+
+  const openRuleSource = async (
+    targetId: string,
+    packId: string,
+    relativePath: string,
+  ) => {
+    const target = openTargets.find((candidate) => candidate.id === targetId);
+    if (!target) return;
+    setPreferredOpenTarget(targetId);
+    writePreferredOpenTarget(targetId);
+    setOpeningTargetId(targetId);
+    try {
+      const opened = await backend.openRuleSource(targetId, packId, relativePath, libraryRoot);
+      setNotice(
+        opened
+          ? {
+              tone: "success",
+              message: t("notice.sourceOpened", {
+                file: relativePath,
+                app: target.id === "default" ? t("source.open.default") : target.label,
+              }),
+            }
+          : { tone: "info", message: t("notice.demoOpen") },
+      );
+    } catch (error) {
+      setNotice({ tone: "error", message: String(error) });
+    } finally {
+      setOpeningTargetId(undefined);
+    }
+  };
+
+  const openPackFile = (packId: string, relativePath: string) => {
+    const targetId = openTargets.some((target) => target.id === preferredOpenTarget)
+      ? preferredOpenTarget
+      : openTargets[0]?.id;
+    if (targetId) void openRuleSource(targetId, packId, relativePath);
+  };
+
+  const createPack = async (draft: PackDraft) => {
+    await backend.createPack(draft, libraryRoot);
+    await loadSnapshot(libraryRoot);
+    setNotice({ tone: "success", message: t("notice.packCreated", { name: draft.name }) });
+  };
+
+  const addPackFile = async (draft: PackFileDraft) => {
+    await backend.addPackFile(draft, libraryRoot);
+    await loadSnapshot(libraryRoot);
+    setNotice({ tone: "success", message: t("notice.packFileAdded", { path: draft.relativePath }) });
+  };
+
+  const createProfile = async (draft: ProfileDraft) => {
+    await backend.createProfile(draft, libraryRoot);
+    await loadSnapshot(libraryRoot);
+    setNotice({ tone: "success", message: t("notice.profileCreated", { name: draft.name }) });
+  };
+
+  const activateProfile = async (profileId: string) => {
+    await backend.activateProfile(profileId, libraryRoot);
+    await loadSnapshot(libraryRoot);
+    setNotice({ tone: "success", message: t("notice.profileActivated", { id: profileId }) });
+  };
+
+  const rollbackLibrary = async () => {
+    const outcome = await backend.rollbackLibrary(libraryRoot);
+    await loadSnapshot(libraryRoot);
+    setNotice({ tone: "success", message: t("notice.libraryRestored", { id: outcome.backupId }) });
   };
 
   if (!snapshot) {
@@ -241,37 +313,114 @@ function App() {
   const installed = snapshot.agents.filter((agent) => agent.installed || agent.connected);
   const connected = installed.filter((agent) => agent.connected).length;
   const pendingChanges = connectionChanges(snapshot, desiredConnections);
+  const activeProfile = snapshot.profiles.find((profile) => profile.isActive);
+  const activePackIds = activeProfile?.packIds ?? [];
+  const activePack = snapshot.packs.find((pack) => pack.id === activePackIds[0]);
+  const activeFile = activePack?.files.find((file) => file.path === "AGENTS.md") ?? activePack?.files[0];
+  const pageTitle = t(`nav.${view === "packs" ? "rulePacks" : view}` as "nav.control");
+  const pageCount =
+    view === "control"
+      ? snapshot.agents.length
+      : view === "packs"
+        ? snapshot.packs.length
+        : view === "profiles"
+          ? snapshot.profiles.length
+          : undefined;
+
+  const renderReadyView = () => {
+    if (view === "settings") return <SettingsPage />;
+    if (view === "packs") {
+      return (
+        <RulePacksPage
+          packs={snapshot.packs}
+          activePackIds={activePackIds}
+          legacySourcePath={snapshot.legacySourcePath}
+          onOpen={openPackFile}
+          onPreviewCreate={(draft) => backend.previewCreatePack(draft, libraryRoot)}
+          onCreate={createPack}
+          onPreviewAddFile={(draft) => backend.previewAddPackFile(draft, libraryRoot)}
+          onAddFile={addPackFile}
+        />
+      );
+    }
+    if (view === "profiles") {
+      return (
+        <ProfilesPage
+          profiles={snapshot.profiles}
+          packs={snapshot.packs}
+          runtimeState={snapshot.runtimeState}
+          latestLibraryBackup={snapshot.latestLibraryBackup}
+          onPreviewCreate={(draft) => backend.previewCreateProfile(draft, libraryRoot)}
+          onCreate={createProfile}
+          onPreviewActivate={(profileId) => backend.previewActivateProfile(profileId, libraryRoot)}
+          onActivate={activateProfile}
+          onRollback={rollbackLibrary}
+        />
+      );
+    }
+    if (!activeProfile || snapshot.runtimeState !== "current" || !snapshot.sourceExists) {
+      return (
+        <section className={`runtime-gate runtime-gate-${snapshot.runtimeState}`}>
+          <span className="runtime-gate-route" aria-hidden="true"><i>P</i><b>→</b><i>C</i></span>
+          <p className="eyebrow">{t("runtimeGate.eyebrow")}</p>
+          <h1>{activeProfile ? t("runtimeGate.refreshTitle") : t("runtimeGate.selectTitle")}</h1>
+          <p>{snapshot.libraryDetail}</p>
+          <button className="button button-primary" onClick={() => setView("profiles")}>
+            {t("runtimeGate.openProfiles")}
+          </button>
+        </section>
+      );
+    }
+    return (
+      <>
+        <ProjectionRail
+          agents={snapshot.agents}
+          sourceDigest={snapshot.sourceDigest}
+          activeProfileName={activeProfile.name}
+          runtimeState={snapshot.runtimeState}
+          plan={plan}
+          desiredConnections={desiredConnections}
+          pendingCount={pendingChanges.length}
+          loading={busy === "planning"}
+          applying={busy === "applying"}
+          onToggle={(agentId, nextConnected) => {
+            setDesiredConnections((current) => {
+              const next = new Set(current);
+              if (nextConnected) next.add(agentId);
+              else next.delete(agentId);
+              return next;
+            });
+            setPlan(undefined);
+          }}
+          onInspect={() => void previewProjection()}
+          onApply={() => void applyProjection()}
+        />
+      </>
+    );
+  };
 
   return (
     <div className="app-shell">
       <nav className="sidebar" aria-label={t("nav.primary")}>
         <div className="brand-lockup">
           <BrandMark />
-          <div>
-            <strong>Agent Rules Manager</strong>
-            <span>{t("brand.subtitle")}</span>
-          </div>
+          <div><strong>Agent Rules Manager</strong><span>{t("brand.subtitle")}</span></div>
         </div>
 
         <div className="nav-primary">
-          <button
-            className={`nav-item ${view === "control" ? "is-active" : ""}`}
-            aria-current={view === "control" ? "page" : undefined}
-            onClick={() => setView("control")}
-          >
-            <span className="nav-icon"><AppIcon name="control" /></span>
-            {t("nav.control")}
-          </button>
-          <button className="nav-item" disabled>
-            <span className="nav-icon"><AppIcon name="rules" /></span>
-            {t("nav.rulePacks")}
-            <small>{t("nav.next")}</small>
-          </button>
-          <button className="nav-item" disabled>
-            <span className="nav-icon"><AppIcon name="profiles" /></span>
-            {t("nav.profiles")}
-            <small>{t("nav.next")}</small>
-          </button>
+          {(["control", "packs", "profiles"] as const).map((item) => (
+            <button
+              className={`nav-item ${view === item ? "is-active" : ""}`}
+              aria-current={view === item ? "page" : undefined}
+              onClick={() => setView(item)}
+              key={item}
+            >
+              <span className="nav-icon">
+                <AppIcon name={item === "packs" ? "rules" : item} />
+              </span>
+              {t(`nav.${item === "packs" ? "rulePacks" : item}` as "nav.control")}
+            </button>
+          ))}
         </div>
 
         <div className="sidebar-readout">
@@ -302,96 +451,79 @@ function App() {
       <div className="main-shell">
         <header className="topbar">
           <div className="page-heading">
-            <h1>{view === "settings" ? t("nav.settings") : t("nav.control")}</h1>
-            {view === "control" && <span>{installed.length}</span>}
+            <h1>{pageTitle}</h1>
+            {pageCount !== undefined && <span>{pageCount}</span>}
           </div>
-        <div className="library-loader">
-          <label htmlFor="library-root">{t("library.label")}</label>
-          <div className="library-field">
-            <AppIcon name="folder" />
-            <input
-              id="library-root"
-              aria-label={t("library.label")}
-              value={libraryInput}
-              onChange={(event) => setLibraryInput(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") void loadSnapshot(libraryInput);
-              }}
-            />
+          <div className="library-loader">
+            <label htmlFor="library-root">{t("library.label")}</label>
+            <div className="library-field">
+              <AppIcon name="folder" />
+              <input
+                id="library-root"
+                aria-label={t("library.label")}
+                value={libraryInput}
+                onChange={(event) => setLibraryInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter") void loadSnapshot(libraryInput);
+                }}
+              />
+            </div>
+            <button
+              className="button button-ghost button-small"
+              onClick={() => void loadSnapshot(libraryInput)}
+              disabled={busy === "loading"}
+            >
+              {t("library.load")}
+            </button>
           </div>
-          <button
-            className="button button-ghost button-small"
-            onClick={() => void loadSnapshot(libraryInput)}
-            disabled={busy === "loading"}
-          >
-            {t("library.load")}
-          </button>
-        </div>
-        <div className="topbar-actions">
-          {!backend.isTauri && <span className="runtime-badge">{t("runtime.demo")}</span>}
-          <button
-            className="button button-ghost button-small"
-            disabled={!snapshot.latestBackup || Boolean(busy)}
-            onClick={() => void rollback()}
-            title={t("rollback.tooltip")}
-          >
-            <AppIcon name="rollback" />
-            {busy === "rollback" ? t("rollback.restoring") : t("rollback.latest")}
-          </button>
-          {view === "control" && snapshot.sourceExists && (
-            <SourceOpenControl
-              targets={openTargets}
-              preferredTargetId={preferredOpenTarget}
-              openingTargetId={openingTargetId}
-              onOpen={(targetId) => void openSource(targetId)}
-            />
-          )}
-        </div>
+          <div className="topbar-actions">
+            {!backend.isTauri && <span className="runtime-badge">{t("runtime.demo")}</span>}
+            {view === "control" && (
+              <button
+                className="button button-ghost button-small"
+                disabled={!snapshot.latestBackup || Boolean(busy)}
+                onClick={() => void rollbackProjection()}
+              >
+                <AppIcon name="rollback" />
+                {busy === "rollback" ? t("rollback.restoring") : t("rollback.latest")}
+              </button>
+            )}
+            {view === "control" && activePack && activeFile && snapshot.sourceExists && (
+              <SourceOpenControl
+                targets={openTargets}
+                preferredTargetId={preferredOpenTarget}
+                openingTargetId={openingTargetId}
+                onOpen={(targetId) =>
+                  void openRuleSource(targetId, activePack.id, activeFile.path)
+                }
+              />
+            )}
+          </div>
         </header>
 
         <main className="workspace">
-        {notice && (
-          <div className={`notice notice-${notice.tone}`} role="status">
-            <span>{notice.message}</span>
-            <button onClick={() => setNotice(undefined)} aria-label={t("notice.dismiss")}>×</button>
-          </div>
-        )}
+          {notice && (
+            <div className={`notice notice-${notice.tone}`} role="status">
+              <span>{notice.message}</span>
+              <button onClick={() => setNotice(undefined)} aria-label={t("notice.dismiss")}>×</button>
+            </div>
+          )}
 
-        {view === "settings" ? (
-          <SettingsPage />
-        ) : !snapshot.sourceExists ? (
-          <section className="source-missing">
-            <p className="eyebrow">{t("source.missing.eyebrow")}</p>
-            <h1>{t("source.missing.title")}</h1>
-            <p>{t("source.missing.body", { path: snapshot.sourcePath })}</p>
-            <button className="button button-primary" onClick={() => void initialize()}>
-              {t("source.missing.initialize")}
-            </button>
-          </section>
-        ) : (
-          <>
-            <ProjectionRail
-              agents={snapshot.agents}
-              sourceDigest={snapshot.sourceDigest}
-              plan={plan}
-              desiredConnections={desiredConnections}
-              pendingCount={pendingChanges.length}
-              loading={busy === "planning"}
-              applying={busy === "applying"}
-              onToggle={(agentId, nextConnected) => {
-                setDesiredConnections((current) => {
-                  const next = new Set(current);
-                  if (nextConnected) next.add(agentId);
-                  else next.delete(agentId);
-                  return next;
-                });
-                setPlan(undefined);
-              }}
-              onInspect={() => void preview()}
-              onApply={() => void apply()}
+          {snapshot.libraryState !== "ready" && view !== "settings" ? (
+            <LibrarySetupPanel
+              state={snapshot.libraryState}
+              detail={snapshot.libraryDetail}
+              legacySourcePath={snapshot.legacySourcePath}
+              plan={setupPlan}
+              planning={busy === "planning-library"}
+              applying={busy === "initializing"}
+              onPreview={() => void previewInitialize()}
+              onApply={() => void initialize()}
+              onCancel={() => setSetupPlan(undefined)}
             />
-          </>
-        )}
+          ) : (
+            renderReadyView()
+          )}
         </main>
       </div>
     </div>
