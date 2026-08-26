@@ -11,7 +11,7 @@ use std::path::PathBuf;
 #[command(
     name = "agent-rules",
     version,
-    about = "Compose Rule Packs into machine-local profiles and project them safely"
+    about = "Manage machine-local rule profiles and project them safely"
 )]
 struct Cli {
     /// Override the versioned rule library directory.
@@ -28,7 +28,7 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
-    /// Preview or initialize the Rule Pack library.
+    /// Preview, initialize, or upgrade the Profile library.
     Init {
         /// Apply the previewed initialization plan.
         #[arg(long)]
@@ -40,11 +40,6 @@ enum Command {
     Status {
         #[arg(long)]
         json: bool,
-    },
-    /// Manage syncable Rule Packs.
-    Packs {
-        #[command(subcommand)]
-        command: PackCommand,
     },
     /// Manage syncable Profiles and the local active selection.
     Profiles {
@@ -79,51 +74,28 @@ enum Command {
 }
 
 #[derive(Debug, Subcommand)]
-enum PackCommand {
-    /// List every Rule Pack and its ordered Markdown instruction files.
-    List {
-        #[arg(long)]
-        json: bool,
-    },
-    /// Preview or create a Rule Pack with a required AGENTS.md.
-    Create {
-        id: String,
-        #[arg(long)]
-        name: String,
-        #[arg(long, default_value = "")]
-        description: String,
-        #[arg(long)]
-        apply: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Preview or append a supplemental Markdown source to a Rule Pack.
-    AddFile {
-        pack_id: String,
-        relative_path: String,
-        #[arg(long)]
-        apply: bool,
-        #[arg(long)]
-        json: bool,
-    },
-}
-
-#[derive(Debug, Subcommand)]
 enum ProfileCommand {
     /// List every Profile in the library and the local active selection.
     List {
         #[arg(long)]
         json: bool,
     },
-    /// Preview or create an ordered composition of Rule Packs.
+    /// Preview or create a Profile with its own required AGENTS.md.
     Create {
         id: String,
         #[arg(long)]
         name: String,
         #[arg(long, default_value = "")]
         description: String,
-        #[arg(long, value_delimiter = ',', required = true)]
-        packs: Vec<String>,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview or append a supplemental Markdown source to a Profile.
+    AddFile {
+        profile_id: String,
+        relative_path: String,
         #[arg(long)]
         apply: bool,
         #[arg(long)]
@@ -173,14 +145,20 @@ fn run() -> Result<(), ArmError> {
             if json {
                 print_json(&snapshot)?;
             } else {
-                println!("Library: {} ({:?})", snapshot.library_root, snapshot.library_state);
+                println!(
+                    "Library: {} ({:?})",
+                    snapshot.library_root, snapshot.library_state
+                );
                 println!("Runtime: {:?}", snapshot.runtime_state);
                 println!(
                     "Active profile: {}",
-                    snapshot.active_profile_id.as_deref().unwrap_or("not selected")
+                    snapshot
+                        .active_profile_id
+                        .as_deref()
+                        .unwrap_or("not selected")
                 );
                 println!("Entrypoint: {}", snapshot.source_path);
-                println!("Rule Packs: {}  Profiles: {}", snapshot.packs.len(), snapshot.profiles.len());
+                println!("Profiles: {}", snapshot.profiles.len());
                 for agent in snapshot.agents {
                     println!(
                         "{:<12} {:<12} {:<12} {}",
@@ -200,52 +178,6 @@ fn run() -> Result<(), ArmError> {
                 }
             }
         }
-        Command::Packs { command } => match command {
-            PackCommand::List { json } => {
-                let packs = manager.snapshot()?.packs;
-                if json {
-                    print_json(&packs)?;
-                } else {
-                    for pack in packs {
-                        println!("{}  {}", pack.id, pack.name);
-                        for file in pack.files {
-                            println!("  {}  {}", file.digest, file.path);
-                        }
-                    }
-                }
-            }
-            PackCommand::Create {
-                id,
-                name,
-                description,
-                apply,
-                json,
-            } => {
-                if apply {
-                    print_mutation(manager.create_pack(&id, &name, &description)?, json)?;
-                } else {
-                    print_library_plan(
-                        manager.plan_create_pack(&id, &name, &description)?,
-                        json,
-                    )?;
-                }
-            }
-            PackCommand::AddFile {
-                pack_id,
-                relative_path,
-                apply,
-                json,
-            } => {
-                if apply {
-                    print_mutation(manager.add_pack_file(&pack_id, &relative_path)?, json)?;
-                } else {
-                    print_library_plan(
-                        manager.plan_add_pack_file(&pack_id, &relative_path)?,
-                        json,
-                    )?;
-                }
-            }
-        },
         Command::Profiles { command } => match command {
             ProfileCommand::List { json } => {
                 let profiles = manager.snapshot()?.profiles;
@@ -254,11 +186,11 @@ fn run() -> Result<(), ArmError> {
                 } else {
                     for profile in profiles {
                         println!(
-                            "{}{}  {}  [{}]",
+                            "{}{}  {}  {} file(s)",
                             if profile.is_active { "* " } else { "  " },
                             profile.id,
                             profile.name,
-                            profile.pack_ids.join(" -> ")
+                            profile.files.len()
                         );
                     }
                 }
@@ -267,18 +199,29 @@ fn run() -> Result<(), ArmError> {
                 id,
                 name,
                 description,
-                packs,
                 apply,
                 json,
             } => {
                 if apply {
-                    print_mutation(
-                        manager.create_profile(&id, &name, &description, &packs)?,
-                        json,
-                    )?;
+                    print_mutation(manager.create_profile(&id, &name, &description)?, json)?;
                 } else {
                     print_library_plan(
-                        manager.plan_create_profile(&id, &name, &description, &packs)?,
+                        manager.plan_create_profile(&id, &name, &description)?,
+                        json,
+                    )?;
+                }
+            }
+            ProfileCommand::AddFile {
+                profile_id,
+                relative_path,
+                apply,
+                json,
+            } => {
+                if apply {
+                    print_mutation(manager.add_profile_file(&profile_id, &relative_path)?, json)?;
+                } else {
+                    print_library_plan(
+                        manager.plan_add_profile_file(&profile_id, &relative_path)?,
                         json,
                     )?;
                 }

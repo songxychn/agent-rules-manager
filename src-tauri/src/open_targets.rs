@@ -59,7 +59,10 @@ pub fn open_source(app: &AppHandle, target_id: &str, source: &Path) -> Result<()
     let metadata = fs::symlink_metadata(source)
         .map_err(|error| format!("cannot open {}: {error}", source.display()))?;
     if !metadata.is_file() {
-        return Err(format!("rules source is not a regular file: {}", source.display()));
+        return Err(format!(
+            "rules source is not a regular file: {}",
+            source.display()
+        ));
     }
 
     let target = resolved_open_targets()
@@ -202,13 +205,21 @@ fn extend_platform_targets(targets: &mut Vec<ResolvedOpenTarget>) {
         ("vscode", "Visual Studio Code", &["Code.exe"][..]),
         ("cursor", "Cursor", &["Cursor.exe"][..]),
         ("typora", "Typora", &["Typora.exe"][..]),
-        ("intellij-idea", "IntelliJ IDEA", &["idea64.exe", "idea.exe"][..]),
+        (
+            "intellij-idea",
+            "IntelliJ IDEA",
+            &["idea64.exe", "idea.exe"][..],
+        ),
         ("rider", "Rider", &["rider64.exe", "rider.exe"][..]),
-        ("webstorm", "WebStorm", &["webstorm64.exe", "webstorm.exe"][..]),
+        (
+            "webstorm",
+            "WebStorm",
+            &["webstorm64.exe", "webstorm.exe"][..],
+        ),
     ];
     for (id, label, names) in editors {
-        let program = find_program(names, &path_roots, 0)
-            .or_else(|| find_program(names, &install_roots, 4));
+        let program =
+            find_program(names, &path_roots, 0).or_else(|| find_program(names, &install_roots, 4));
         if let Some(program) = program {
             targets.push(ResolvedOpenTarget::new(
                 id,
@@ -290,7 +301,11 @@ fn extend_platform_targets(targets: &mut Vec<ResolvedOpenTarget>) {
         None,
     ));
     let terminals = [
-        ("terminal", "Terminal", &["gnome-terminal", "x-terminal-emulator"][..]),
+        (
+            "terminal",
+            "Terminal",
+            &["gnome-terminal", "x-terminal-emulator"][..],
+        ),
         ("konsole", "Konsole", &["konsole"][..]),
         ("xfce-terminal", "Xfce Terminal", &["xfce4-terminal"][..]),
     ];
@@ -390,7 +405,10 @@ mod tests {
     #[test]
     fn default_target_is_always_first() {
         let targets = list_open_targets();
-        assert_eq!(targets.first().map(|target| target.id.as_str()), Some("default"));
+        assert_eq!(
+            targets.first().map(|target| target.id.as_str()),
+            Some("default")
+        );
     }
 
     #[test]

@@ -8,7 +8,7 @@ export type TargetKind =
   | "legacyInclude"
   | "foreignLink"
   | "invalidManagedFile";
-export type LibraryState = "empty" | "legacy" | "ready" | "conflict";
+export type LibraryState = "empty" | "legacy" | "upgrade" | "ready" | "conflict";
 export type RuntimeState = "missing" | "current" | "stale" | "conflict";
 
 export interface AgentStatus {
@@ -35,18 +35,11 @@ export interface RuleFileSummary {
   modifiedAt?: string;
 }
 
-export interface RulePackSummary {
-  id: string;
-  name: string;
-  description: string;
-  files: RuleFileSummary[];
-}
-
 export interface ProfileSummary {
   id: string;
   name: string;
   description: string;
-  packIds: string[];
+  files: RuleFileSummary[];
   isActive: boolean;
 }
 
@@ -62,7 +55,6 @@ export interface WorkspaceSnapshot {
   activeProfileId?: string;
   activeSourcePath?: string;
   legacySourcePath?: string;
-  packs: RulePackSummary[];
   profiles: ProfileSummary[];
   latestBackup?: string;
   latestLibraryBackup?: string;
@@ -123,20 +115,13 @@ export interface RollbackOutcome {
   backupId: string;
 }
 
-export interface PackDraft {
-  id: string;
-  name: string;
-  description: string;
-}
-
-export interface PackFileDraft {
-  packId: string;
-  relativePath: string;
-}
-
 export interface ProfileDraft {
   id: string;
   name: string;
   description: string;
-  packIds: string[];
+}
+
+export interface ProfileFileDraft {
+  profileId: string;
+  relativePath: string;
 }

@@ -12,7 +12,6 @@ const snapshot: WorkspaceSnapshot = {
   sourceDigest: "abc123",
   sourceModifiedAt: "2026-08-26T08:00:00Z",
   activeProfileId: "default",
-  packs: [],
   profiles: [],
   agents: [
     {

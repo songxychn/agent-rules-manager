@@ -34,10 +34,7 @@ fn get_workspace_snapshot(
 }
 
 #[tauri::command]
-fn preview_initialize(
-    app: AppHandle,
-    library_root: Option<String>,
-) -> Result<LibraryPlan, String> {
+fn preview_initialize(app: AppHandle, library_root: Option<String>) -> Result<LibraryPlan, String> {
     build_manager(&app, library_root)?
         .plan_initialize()
         .map_err(|error| error.to_string())
@@ -54,66 +51,15 @@ fn initialize_library(
 }
 
 #[tauri::command]
-fn preview_create_pack(
-    app: AppHandle,
-    library_root: Option<String>,
-    id: String,
-    name: String,
-    description: String,
-) -> Result<LibraryPlan, String> {
-    build_manager(&app, library_root)?
-        .plan_create_pack(&id, &name, &description)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn create_pack(
-    app: AppHandle,
-    library_root: Option<String>,
-    id: String,
-    name: String,
-    description: String,
-) -> Result<LibraryMutationOutcome, String> {
-    build_manager(&app, library_root)?
-        .create_pack(&id, &name, &description)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn preview_add_pack_file(
-    app: AppHandle,
-    library_root: Option<String>,
-    pack_id: String,
-    relative_path: String,
-) -> Result<LibraryPlan, String> {
-    build_manager(&app, library_root)?
-        .plan_add_pack_file(&pack_id, &relative_path)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn add_pack_file(
-    app: AppHandle,
-    library_root: Option<String>,
-    pack_id: String,
-    relative_path: String,
-) -> Result<LibraryMutationOutcome, String> {
-    build_manager(&app, library_root)?
-        .add_pack_file(&pack_id, &relative_path)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
 fn preview_create_profile(
     app: AppHandle,
     library_root: Option<String>,
     id: String,
     name: String,
     description: String,
-    pack_ids: Vec<String>,
 ) -> Result<LibraryPlan, String> {
     build_manager(&app, library_root)?
-        .plan_create_profile(&id, &name, &description, &pack_ids)
+        .plan_create_profile(&id, &name, &description)
         .map_err(|error| error.to_string())
 }
 
@@ -124,10 +70,33 @@ fn create_profile(
     id: String,
     name: String,
     description: String,
-    pack_ids: Vec<String>,
 ) -> Result<LibraryMutationOutcome, String> {
     build_manager(&app, library_root)?
-        .create_profile(&id, &name, &description, &pack_ids)
+        .create_profile(&id, &name, &description)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn preview_add_profile_file(
+    app: AppHandle,
+    library_root: Option<String>,
+    profile_id: String,
+    relative_path: String,
+) -> Result<LibraryPlan, String> {
+    build_manager(&app, library_root)?
+        .plan_add_profile_file(&profile_id, &relative_path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn add_profile_file(
+    app: AppHandle,
+    library_root: Option<String>,
+    profile_id: String,
+    relative_path: String,
+) -> Result<LibraryMutationOutcome, String> {
+    build_manager(&app, library_root)?
+        .add_profile_file(&profile_id, &relative_path)
         .map_err(|error| error.to_string())
 }
 
@@ -174,11 +143,11 @@ fn open_rule_source(
     app: AppHandle,
     library_root: Option<String>,
     target_id: String,
-    pack_id: String,
+    profile_id: String,
     relative_path: String,
 ) -> Result<(), String> {
     let source = build_manager(&app, library_root)?
-        .rule_source_path(&pack_id, &relative_path)
+        .rule_source_path(&profile_id, &relative_path)
         .map_err(|error| error.to_string())?;
     open_targets::open_source(&app, &target_id, &source)
 }
@@ -222,12 +191,10 @@ pub fn run() {
             get_workspace_snapshot,
             preview_initialize,
             initialize_library,
-            preview_create_pack,
-            create_pack,
-            preview_add_pack_file,
-            add_pack_file,
             preview_create_profile,
             create_profile,
+            preview_add_profile_file,
+            add_profile_file,
             preview_activate_profile,
             activate_profile,
             preview_apply,
