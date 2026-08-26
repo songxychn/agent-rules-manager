@@ -1089,82 +1089,12 @@ code {
 }
 
 .open-target-icon {
-  display: grid;
+  display: block;
   width: 26px;
   height: 26px;
   flex: 0 0 auto;
-  place-items: center;
-  border: 1px solid #d7dbe0;
-  border-radius: 6px;
-  background: #f7f8f9;
-  color: #555c65;
-  font-family: var(--mono);
-  font-size: 7px;
-  font-weight: 800;
-}
-
-.open-target-vscode {
-  border-color: #b9dcf1;
-  background: #edf8ff;
-  color: #1476a8;
-}
-
-.open-target-cursor {
-  border-color: #4b4f54;
-  background: #4b4f54;
-  color: #fff;
-}
-
-.open-target-cursor::before {
-  width: 8px;
-  height: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.72);
-  background: #fff;
-  box-shadow: 3px 3px 0 rgba(255, 255, 255, 0.28);
-  content: "";
-  transform: rotate(45deg);
-}
-
-.open-target-typora,
-.open-target-textedit {
-  border-color: #bfd4ec;
-  background: #eef5fc;
-  color: #3973ad;
-}
-
-.open-target-intellij-idea {
-  border-color: #34373c;
-  background: #202226;
-  color: #fff;
-}
-
-.open-target-rider {
-  border-color: #ddc6f1;
-  background: #f4ebfb;
-  color: #7546a0;
-}
-
-.open-target-webstorm {
-  border-color: #abdde3;
-  background: #e8f8fa;
-  color: #14727c;
-}
-
-.open-target-finder,
-.open-target-explorer,
-.open-target-files {
-  border-color: #b9d8f0;
-  background: #e8f4fd;
-  color: #0e6199;
-}
-
-.open-target-terminal,
-.open-target-windows-terminal,
-.open-target-konsole,
-.open-target-xfce-terminal {
-  border-color: #575c61;
-  background: #3f4348;
-  color: #fff;
+  object-fit: contain;
+  user-select: none;
 }
 
 .open-target-menu {

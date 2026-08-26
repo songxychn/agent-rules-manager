@@ -2,6 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { resolveOpenTarget } from "../lib/openTargets";
 import type { OpenTarget } from "../lib/types";
 import { useI18n } from "../lib/i18n";
+import cursorIcon from "../assets/open-target-icons/cursor.png";
+import defaultIcon from "../assets/open-target-icons/default.png";
+import finderIcon from "../assets/open-target-icons/finder.png";
+import intellijIdeaIcon from "../assets/open-target-icons/intellij-idea.png";
+import riderIcon from "../assets/open-target-icons/rider.png";
+import terminalIcon from "../assets/open-target-icons/terminal.png";
+import textEditIcon from "../assets/open-target-icons/textedit.png";
+import typoraIcon from "../assets/open-target-icons/typora.png";
+import vscodeIcon from "../assets/open-target-icons/vscode.png";
+import webstormIcon from "../assets/open-target-icons/webstorm.png";
 
 interface SourceOpenControlProps {
   targets: OpenTarget[];
@@ -10,30 +20,28 @@ interface SourceOpenControlProps {
   onOpen: (targetId: string) => void;
 }
 
-const iconMarks: Record<string, string> = {
-  default: "↗",
-  vscode: "VS",
-  cursor: "",
-  typora: "T",
-  textedit: "A",
-  notepad: "N",
-  "intellij-idea": "IJ",
-  rider: "RD",
-  webstorm: "WS",
-  finder: "FI",
-  explorer: "EX",
-  files: "FL",
-  terminal: ">_",
-  "windows-terminal": ">_",
-  konsole: ">_",
-  "xfce-terminal": ">_",
+const iconSources: Record<string, string> = {
+  default: defaultIcon,
+  vscode: vscodeIcon,
+  cursor: cursorIcon,
+  typora: typoraIcon,
+  textedit: textEditIcon,
+  "intellij-idea": intellijIdeaIcon,
+  rider: riderIcon,
+  webstorm: webstormIcon,
+  finder: finderIcon,
+  terminal: terminalIcon,
 };
 
 function OpenTargetIcon({ target }: { target: OpenTarget }) {
   return (
-    <span className={`open-target-icon open-target-${target.id}`} aria-hidden="true">
-      {iconMarks[target.id] ?? target.label.slice(0, 2).toUpperCase()}
-    </span>
+    <img
+      className="open-target-icon"
+      src={iconSources[target.id] ?? defaultIcon}
+      alt=""
+      aria-hidden="true"
+      draggable={false}
+    />
   );
 }
 
@@ -116,7 +124,13 @@ export function SourceOpenControl({
           {activeTarget ? (
             <OpenTargetIcon target={activeTarget} />
           ) : (
-            <span className="open-target-icon" aria-hidden="true">—</span>
+            <img
+              className="open-target-icon"
+              src={defaultIcon}
+              alt=""
+              aria-hidden="true"
+              draggable={false}
+            />
           )}
         </button>
         <button
