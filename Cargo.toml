@@ -1,0 +1,18 @@
+[workspace]
+members = ["crates/arm-core", "crates/arm-cli", "src-tauri"]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/baizhukui/agent-rules-manager"
+
+[workspace.dependencies]
+arm-core = { path = "crates/arm-core" }
+chrono = { version = "0.4", features = ["serde"] }
+clap = { version = "4", features = ["derive"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "2"

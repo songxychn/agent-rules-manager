@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title desc">
+  <title id="title">Agent Rules Manager</title>
+  <desc id="desc">One rules document projecting to four agent targets.</desc>
+  <rect width="1024" height="1024" rx="224" fill="#16252d"/>
+  <path d="M752 1024H1024V752L752 1024Z" fill="#2855d9"/>
+  <rect x="188" y="188" width="316" height="648" rx="52" fill="#f8fbfc"/>
+  <path d="M248 324H444M248 404H420M248 484H444M248 564H388" fill="none" stroke="#2855d9" stroke-linecap="round" stroke-width="34"/>
+  <path d="M504 352H650M504 512H650M504 672H650" fill="none" stroke="#9eb0b9" stroke-width="26"/>
+  <path d="M650 272V752" fill="none" stroke="#9eb0b9" stroke-width="26"/>
+  <circle cx="716" cy="272" r="62" fill="#d9eee9" stroke="#177b6d" stroke-width="24"/>
+  <circle cx="716" cy="432" r="62" fill="#d9eee9" stroke="#177b6d" stroke-width="24"/>
+  <circle cx="716" cy="592" r="62" fill="#d9eee9" stroke="#177b6d" stroke-width="24"/>
+  <circle cx="716" cy="752" r="62" fill="#fff0cc" stroke="#b66b00" stroke-width="24"/>
+  <path d="M650 272H654M650 432H654M650 592H654M650 752H654" fill="none" stroke="#9eb0b9" stroke-linecap="round" stroke-width="26"/>
+</svg>

@@ -1,0 +1,19 @@
+[package]
+name = "agent-rules-manager-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+name = "agent_rules_manager_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+arm-core.workspace = true
+serde.workspace = true
+tauri = { version = "2", features = [] }
+tauri-plugin-opener = "2.5.4"
