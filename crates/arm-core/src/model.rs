@@ -62,6 +62,7 @@ pub struct AgentStatus {
 pub enum LibraryState {
     Empty,
     Legacy,
+    Upgrade,
     Ready,
     Conflict,
 }
@@ -85,20 +86,11 @@ pub struct RuleFileSummary {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
-pub struct RulePackSummary {
-    pub id: String,
-    pub name: String,
-    pub description: String,
-    pub files: Vec<RuleFileSummary>,
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[serde(rename_all = "camelCase")]
 pub struct ProfileSummary {
     pub id: String,
     pub name: String,
     pub description: String,
-    pub pack_ids: Vec<String>,
+    pub files: Vec<RuleFileSummary>,
     pub is_active: bool,
 }
 
@@ -124,7 +116,6 @@ pub struct WorkspaceSnapshot {
     pub active_profile_id: Option<String>,
     pub active_source_path: Option<String>,
     pub legacy_source_path: Option<String>,
-    pub packs: Vec<RulePackSummary>,
     pub profiles: Vec<ProfileSummary>,
     pub latest_backup: Option<String>,
     pub latest_library_backup: Option<String>,
@@ -209,8 +200,6 @@ pub enum ArmError {
     ApplyDrift(String),
     #[error("unknown agent adapter: {0}")]
     UnknownAgent(String),
-    #[error("unknown rule pack: {0}")]
-    UnknownPack(String),
     #[error("unknown profile: {0}")]
     UnknownProfile(String),
     #[error("invalid rule library: {0}")]

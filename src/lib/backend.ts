@@ -5,9 +5,8 @@ import type {
   LibraryMutationOutcome,
   LibraryPlan,
   OpenTarget,
-  PackDraft,
-  PackFileDraft,
   ProfileDraft,
+  ProfileFileDraft,
   ProjectionPlan,
   RollbackOutcome,
   WorkspaceSnapshot,
@@ -28,55 +27,33 @@ let demoSnapshot: WorkspaceSnapshot = {
   sourceDigest: "8d9f20b751a4",
   sourceModifiedAt: "2026-08-26T08:36:00Z",
   activeProfileId: "work",
-  activeSourcePath: `${demoRoot}/packs/base/AGENTS.md`,
-  packs: [
-    {
-      id: "base",
-      name: "Base rules",
-      description: "Everyday engineering and safety defaults.",
-      files: [
-        { path: "AGENTS.md", digest: "62a4fb4f20c1", modifiedAt: "2026-08-26T08:36:00Z" },
-        { path: "rules/safety.md", digest: "a1d19e80bc3e", modifiedAt: "2026-08-25T09:12:00Z" },
-      ],
-    },
-    {
-      id: "work",
-      name: "Work conventions",
-      description: "Repository delivery and review conventions used at work.",
-      files: [
-        { path: "AGENTS.md", digest: "5c3fe71b9d02", modifiedAt: "2026-08-24T04:18:00Z" },
-        { path: "rules/review.md", digest: "0b79a43e04a8", modifiedAt: "2026-08-24T04:18:00Z" },
-      ],
-    },
-    {
-      id: "personal",
-      name: "Personal projects",
-      description: "Preferences for experiments and open-source maintenance.",
-      files: [
-        { path: "AGENTS.md", digest: "7ef49a3ecb44", modifiedAt: "2026-08-21T13:05:00Z" },
-      ],
-    },
-  ],
+  activeSourcePath: `${demoRoot}/profiles/work/AGENTS.md`,
   profiles: [
     {
       id: "default",
       name: "Default",
       description: "A minimal baseline for any machine.",
-      packIds: ["base"],
+      files: [
+        { path: "AGENTS.md", digest: "62a4fb4f20c1", modifiedAt: "2026-08-26T08:36:00Z" },
+        { path: "rules/safety.md", digest: "a1d19e80bc3e", modifiedAt: "2026-08-25T09:12:00Z" },
+      ],
       isActive: false,
     },
     {
       id: "work",
       name: "Work machine",
-      description: "Base safety plus work delivery conventions.",
-      packIds: ["base", "work"],
+      description: "Repository delivery and review conventions used at work.",
+      files: [
+        { path: "AGENTS.md", digest: "5c3fe71b9d02", modifiedAt: "2026-08-24T04:18:00Z" },
+        { path: "rules/review.md", digest: "0b79a43e04a8", modifiedAt: "2026-08-24T04:18:00Z" },
+      ],
       isActive: true,
     },
     {
       id: "personal",
       name: "Personal laptop",
-      description: "Base rules plus personal project preferences.",
-      packIds: ["base", "personal"],
+      description: "Preferences for experiments and open-source maintenance.",
+      files: [{ path: "AGENTS.md", digest: "7ef49a3ecb44", modifiedAt: "2026-08-21T13:05:00Z" }],
       isActive: false,
     },
   ],
@@ -180,11 +157,10 @@ export const backend = {
   },
   async previewInitialize(libraryRoot?: string): Promise<LibraryPlan> {
     if (isTauri) return invoke("preview_initialize", { libraryRoot });
-    return plan("initialize", "Create a Rule Pack library and activate its default Profile.", [
+    return plan("initialize", "Create a Profile library and activate its default Profile.", [
       step(`${demoRoot}/schema.json`, "createSchema", "Create the syncable schema."),
-      step(`${demoRoot}/packs/base/pack.json`, "createPack", "Create the base Pack manifest."),
-      step(`${demoRoot}/packs/base/AGENTS.md`, "createRules", "Create the required rules entrypoint."),
-      step(`${demoRoot}/profiles/default.json`, "createProfile", "Create the default Profile."),
+      step(`${demoRoot}/profiles/default/profile.json`, "createProfile", "Create the default Profile manifest."),
+      step(`${demoRoot}/profiles/default/AGENTS.md`, "createRules", "Create its required rules entrypoint."),
       step(`${demoRoot}/.gitignore`, "createIgnore", "Exclude local runtime state."),
       step(`${demoRoot}/.runtime/default-demo`, "renderRuntime", "Render immutable output."),
       step(`${demoRoot}/current`, "switchCurrent", "Select the default runtime."),
@@ -194,78 +170,7 @@ export const backend = {
   async initialize(libraryRoot?: string): Promise<LibraryMutationOutcome> {
     if (isTauri) return invoke("initialize_library", { libraryRoot });
     demoSnapshot.libraryState = "ready";
-    return mutation([`${demoRoot}/schema.json`, `${demoRoot}/packs/base/AGENTS.md`]);
-  },
-  async previewCreatePack(draft: PackDraft, libraryRoot?: string): Promise<LibraryPlan> {
-    if (isTauri) return invoke("preview_create_pack", { ...draft, libraryRoot });
-    const directory = `${demoRoot}/packs/${draft.id}`;
-    const blocked = demoSnapshot.packs.some((pack) => pack.id === draft.id);
-    return {
-      operation: "createPack",
-      blocked,
-      changeCount: blocked ? 0 : 2,
-      summary: blocked
-        ? `Rule Pack \`${draft.id}\` already exists; no file will be overwritten.`
-        : `Create Rule Pack \`${draft.name}\` with a required AGENTS.md entrypoint.`,
-      steps: blocked
-        ? []
-        : [
-            step(`${directory}/pack.json`, "createPack", "Create the Rule Pack manifest."),
-            step(`${directory}/AGENTS.md`, "createRules", "Create the required AGENTS.md."),
-          ],
-    };
-  },
-  async createPack(draft: PackDraft, libraryRoot?: string): Promise<LibraryMutationOutcome> {
-    if (isTauri) return invoke("create_pack", { ...draft, libraryRoot });
-    const files = [{ path: "AGENTS.md", digest: "new000000000" }];
-    demoSnapshot.packs = [
-      ...demoSnapshot.packs,
-      { id: draft.id, name: draft.name, description: draft.description, files },
-    ];
-    return mutation([`${demoRoot}/packs/${draft.id}/pack.json`, `${demoRoot}/packs/${draft.id}/AGENTS.md`]);
-  },
-  async previewAddPackFile(draft: PackFileDraft, libraryRoot?: string): Promise<LibraryPlan> {
-    if (isTauri) return invoke("preview_add_pack_file", { ...draft, libraryRoot });
-    const pack = demoSnapshot.packs.find((candidate) => candidate.id === draft.packId);
-    const blocked = !pack || pack.files.some((file) => file.path === draft.relativePath);
-    const path = `${demoRoot}/packs/${draft.packId}/${draft.relativePath}`;
-    return {
-      operation: "addPackFile",
-      blocked,
-      changeCount: blocked ? 0 : 2,
-      summary: blocked
-        ? `\`${draft.relativePath}\` already exists or the Rule Pack is unavailable.`
-        : `Add \`${draft.relativePath}\` after the existing sources in Rule Pack \`${draft.packId}\`.`,
-      steps: blocked
-        ? []
-        : [
-            step(`${demoRoot}/packs/${draft.packId}/pack.json`, "updatePack", "Append the ordered path."),
-            step(path, "createRuleFile", "Create the Markdown source."),
-          ],
-    };
-  },
-  async addPackFile(draft: PackFileDraft, libraryRoot?: string): Promise<LibraryMutationOutcome> {
-    if (isTauri) return invoke("add_pack_file", { ...draft, libraryRoot });
-    demoSnapshot = {
-      ...demoSnapshot,
-      runtimeState: demoSnapshot.profiles
-        .find((profile) => profile.isActive)
-        ?.packIds.includes(draft.packId)
-        ? "stale"
-        : demoSnapshot.runtimeState,
-      packs: demoSnapshot.packs.map((pack) =>
-        pack.id === draft.packId
-          ? {
-              ...pack,
-              files: [...pack.files, { path: draft.relativePath, digest: "newfile00000" }],
-            }
-          : pack,
-      ),
-    };
-    return mutation([
-      `${demoRoot}/packs/${draft.packId}/pack.json`,
-      `${demoRoot}/packs/${draft.packId}/${draft.relativePath}`,
-    ]);
+    return mutation([`${demoRoot}/schema.json`, `${demoRoot}/profiles/default/AGENTS.md`]);
   },
   async previewCreateProfile(draft: ProfileDraft, libraryRoot?: string): Promise<LibraryPlan> {
     if (isTauri) {
@@ -273,20 +178,24 @@ export const backend = {
         id: draft.id,
         name: draft.name,
         description: draft.description,
-        packIds: draft.packIds,
         libraryRoot,
       });
     }
-    const path = `${demoRoot}/profiles/${draft.id}.json`;
+    const directory = `${demoRoot}/profiles/${draft.id}`;
     const blocked = demoSnapshot.profiles.some((profile) => profile.id === draft.id);
     return {
       operation: "createProfile",
       blocked,
-      changeCount: blocked ? 0 : 1,
+      changeCount: blocked ? 0 : 2,
       summary: blocked
         ? `Profile \`${draft.id}\` already exists; no file will be overwritten.`
-        : `Create Profile \`${draft.name}\` from ${draft.packIds.length} ordered Rule Pack(s).`,
-      steps: blocked ? [] : [step(path, "createProfile", "Write the ordered Rule Pack ids.")],
+        : `Create Profile \`${draft.name}\` with a required AGENTS.md entrypoint.`,
+      steps: blocked
+        ? []
+        : [
+            step(`${directory}/profile.json`, "createProfile", "Create the Profile manifest."),
+            step(`${directory}/AGENTS.md`, "createRules", "Create the required AGENTS.md."),
+          ],
     };
   },
   async createProfile(draft: ProfileDraft, libraryRoot?: string): Promise<LibraryMutationOutcome> {
@@ -295,15 +204,69 @@ export const backend = {
         id: draft.id,
         name: draft.name,
         description: draft.description,
-        packIds: draft.packIds,
         libraryRoot,
       });
     }
     demoSnapshot.profiles = [
       ...demoSnapshot.profiles,
-      { ...draft, isActive: false },
+      { ...draft, files: [{ path: "AGENTS.md", digest: "new000000000" }], isActive: false },
     ];
-    return mutation([`${demoRoot}/profiles/${draft.id}.json`]);
+    return mutation([
+      `${demoRoot}/profiles/${draft.id}/profile.json`,
+      `${demoRoot}/profiles/${draft.id}/AGENTS.md`,
+    ]);
+  },
+  async previewAddProfileFile(
+    draft: ProfileFileDraft,
+    libraryRoot?: string,
+  ): Promise<LibraryPlan> {
+    if (isTauri) return invoke("preview_add_profile_file", { ...draft, libraryRoot });
+    const profile = demoSnapshot.profiles.find((candidate) => candidate.id === draft.profileId);
+    const blocked = !profile || profile.files.some((file) => file.path === draft.relativePath);
+    const path = `${demoRoot}/profiles/${draft.profileId}/${draft.relativePath}`;
+    return {
+      operation: "addProfileFile",
+      blocked,
+      changeCount: blocked ? 0 : 2,
+      summary: blocked
+        ? `\`${draft.relativePath}\` already exists or the Profile is unavailable.`
+        : `Add \`${draft.relativePath}\` after the existing sources in Profile \`${draft.profileId}\`.`,
+      steps: blocked
+        ? []
+        : [
+            step(
+              `${demoRoot}/profiles/${draft.profileId}/profile.json`,
+              "updateProfile",
+              "Append the ordered path.",
+            ),
+            step(path, "createRuleFile", "Create the Markdown source."),
+          ],
+    };
+  },
+  async addProfileFile(
+    draft: ProfileFileDraft,
+    libraryRoot?: string,
+  ): Promise<LibraryMutationOutcome> {
+    if (isTauri) return invoke("add_profile_file", { ...draft, libraryRoot });
+    demoSnapshot = {
+      ...demoSnapshot,
+      runtimeState:
+        demoSnapshot.activeProfileId === draft.profileId
+          ? "stale"
+          : demoSnapshot.runtimeState,
+      profiles: demoSnapshot.profiles.map((profile) =>
+        profile.id === draft.profileId
+          ? {
+              ...profile,
+              files: [...profile.files, { path: draft.relativePath, digest: "newfile00000" }],
+            }
+          : profile,
+      ),
+    };
+    return mutation([
+      `${demoRoot}/profiles/${draft.profileId}/profile.json`,
+      `${demoRoot}/profiles/${draft.profileId}/${draft.relativePath}`,
+    ]);
   },
   async previewActivateProfile(profileId: string, libraryRoot?: string): Promise<LibraryPlan> {
     if (isTauri) return invoke("preview_activate_profile", { profileId, libraryRoot });
@@ -324,11 +287,13 @@ export const backend = {
     if (isTauri) return invoke("activate_profile", { profileId, libraryRoot });
     const profile = demoSnapshot.profiles.find((candidate) => candidate.id === profileId);
     if (!profile) throw new Error(`Unknown profile: ${profileId}`);
-    const firstPack = demoSnapshot.packs.find((pack) => pack.id === profile.packIds[0]);
+    const firstFile = profile.files[0];
     demoSnapshot = {
       ...demoSnapshot,
       activeProfileId: profileId,
-      activeSourcePath: firstPack ? `${demoRoot}/packs/${firstPack.id}/AGENTS.md` : undefined,
+      activeSourcePath: firstFile
+        ? `${demoRoot}/profiles/${profile.id}/${firstFile.path}`
+        : undefined,
       runtimeState: "current",
       libraryDetail: `Profile \`${profileId}\` is rendered and selected on this machine.`,
       sourceDigest: `${profileId}00000000`.slice(0, 12),
@@ -351,12 +316,12 @@ export const backend = {
   },
   async openRuleSource(
     targetId: string,
-    packId: string,
+    profileId: string,
     relativePath: string,
     libraryRoot?: string,
   ): Promise<boolean> {
     if (isTauri) {
-      await invoke("open_rule_source", { targetId, packId, relativePath, libraryRoot });
+      await invoke("open_rule_source", { targetId, profileId, relativePath, libraryRoot });
       return true;
     }
     return false;

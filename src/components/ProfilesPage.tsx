@@ -2,8 +2,8 @@ import { useState } from "react";
 import type {
   LibraryPlan,
   ProfileDraft,
+  ProfileFileDraft,
   ProfileSummary,
-  RulePackSummary,
   RuntimeState,
 } from "../lib/types";
 import { useI18n } from "../lib/i18n";
@@ -11,25 +11,29 @@ import { LibraryPlanPreview } from "./LibraryPlanPreview";
 
 interface ProfilesPageProps {
   profiles: ProfileSummary[];
-  packs: RulePackSummary[];
   runtimeState: RuntimeState;
   latestLibraryBackup?: string;
+  onOpen: (profileId: string, path: string) => void;
   onPreviewCreate: (draft: ProfileDraft) => Promise<LibraryPlan>;
   onCreate: (draft: ProfileDraft) => Promise<void>;
+  onPreviewAddFile: (draft: ProfileFileDraft) => Promise<LibraryPlan>;
+  onAddFile: (draft: ProfileFileDraft) => Promise<void>;
   onPreviewActivate: (profileId: string) => Promise<LibraryPlan>;
   onActivate: (profileId: string) => Promise<void>;
   onRollback: () => Promise<void>;
 }
 
-const emptyDraft: ProfileDraft = { id: "", name: "", description: "", packIds: [] };
+const emptyDraft: ProfileDraft = { id: "", name: "", description: "" };
 
 export function ProfilesPage({
   profiles,
-  packs,
   runtimeState,
   latestLibraryBackup,
+  onOpen,
   onPreviewCreate,
   onCreate,
+  onPreviewAddFile,
+  onAddFile,
   onPreviewActivate,
   onActivate,
   onRollback,
@@ -37,38 +41,17 @@ export function ProfilesPage({
   const { t } = useI18n();
   const [draft, setDraft] = useState<ProfileDraft>(emptyDraft);
   const [createPlan, setCreatePlan] = useState<LibraryPlan>();
+  const [fileDraft, setFileDraft] = useState<ProfileFileDraft>();
+  const [filePlan, setFilePlan] = useState<{ profileId: string; plan: LibraryPlan }>();
   const [activation, setActivation] = useState<{ profileId: string; plan: LibraryPlan }>();
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
   const [rollbackArmed, setRollbackArmed] = useState(false);
 
-  const packById = new Map(packs.map((pack) => [pack.id, pack]));
-
-  const updateDraft = (field: "id" | "name" | "description", value: string) => {
+  const updateDraft = (field: keyof ProfileDraft, value: string) => {
     setDraft((current) => ({ ...current, [field]: value }));
     setCreatePlan(undefined);
     setError(undefined);
-  };
-
-  const togglePack = (id: string) => {
-    setDraft((current) => ({
-      ...current,
-      packIds: current.packIds.includes(id)
-        ? current.packIds.filter((packId) => packId !== id)
-        : [...current.packIds, id],
-    }));
-    setCreatePlan(undefined);
-  };
-
-  const movePack = (index: number, delta: number) => {
-    setDraft((current) => {
-      const target = index + delta;
-      if (target < 0 || target >= current.packIds.length) return current;
-      const packIds = [...current.packIds];
-      [packIds[index], packIds[target]] = [packIds[target], packIds[index]];
-      return { ...current, packIds };
-    });
-    setCreatePlan(undefined);
   };
 
   const run = async (key: string, action: () => Promise<void>) => {
@@ -91,6 +74,21 @@ export function ProfilesPage({
       await onCreate(draft);
       setDraft(emptyDraft);
       setCreatePlan(undefined);
+    });
+
+  const previewFile = (nextDraft: ProfileFileDraft) =>
+    run(`preview-file-${nextDraft.profileId}`, async () => {
+      setFilePlan({
+        profileId: nextDraft.profileId,
+        plan: await onPreviewAddFile(nextDraft),
+      });
+    });
+
+  const addFile = (nextDraft: ProfileFileDraft) =>
+    run(`add-file-${nextDraft.profileId}`, async () => {
+      await onAddFile(nextDraft);
+      setFileDraft(undefined);
+      setFilePlan(undefined);
     });
 
   const previewActivation = (profileId: string) =>
@@ -120,7 +118,10 @@ export function ProfilesPage({
         </div>
         <div className="machine-selection-readout">
           <span className="route-lamp is-on" aria-hidden="true" />
-          <div><small>{t("profiles.machineLabel")}</small><strong>{t("profiles.machineLocal")}</strong></div>
+          <div>
+            <small>{t("profiles.machineLabel")}</small>
+            <strong>{t("profiles.machineLocal")}</strong>
+          </div>
           <code>machine.json</code>
         </div>
       </header>
@@ -159,11 +160,14 @@ export function ProfilesPage({
       <div className="library-page-grid">
         <section className="profile-patch-sheet" aria-label={t("profiles.listLabel")}>
           {profiles.map((profile, index) => {
-            const pending = activation?.profileId === profile.id;
+            const activationPending = activation?.profileId === profile.id;
+            const editingFile = fileDraft?.profileId === profile.id;
+            const filePreviewPending = filePlan?.profileId === profile.id;
+
             return (
               <article className={`profile-route-card ${profile.isActive ? "is-active" : ""}`} key={profile.id}>
                 <header>
-                  <span className="profile-sequence">R{String(index + 1).padStart(2, "0")}</span>
+                  <span className="profile-sequence">P{String(index + 1).padStart(2, "0")}</span>
                   <div>
                     <span className="manifest-id">{profile.id}</span>
                     <h2>{profile.name}</h2>
@@ -172,20 +176,90 @@ export function ProfilesPage({
                   {profile.isActive && <span className="active-machine-badge">{t("profiles.activeHere")}</span>}
                 </header>
 
-                <div className="profile-pack-route" role="group" aria-label={t("profiles.packOrder")}>
-                  {profile.packIds.map((packId, packIndex) => (
-                    <div className="profile-pack-port" key={packId}>
-                      <span>{String(packIndex + 1).padStart(2, "0")}</span>
-                      <strong>{packById.get(packId)?.name ?? packId}</strong>
-                      <code>{packId}</code>
-                      {packIndex < profile.packIds.length - 1 && <i aria-hidden="true">→</i>}
-                    </div>
-                  ))}
-                  <div className="profile-output-port">
-                    <span aria-hidden="true" />
-                    <div><strong>current/</strong><code>AGENTS.md</code></div>
-                  </div>
+                <div className="profile-files-heading">
+                  <span>{t("profiles.files")}</span>
+                  <small>{t("profiles.fileCount", { count: profile.files.length })}</small>
                 </div>
+                <ol className="pack-file-list profile-file-list">
+                  {profile.files.map((file, fileIndex) => (
+                    <li key={file.path}>
+                      <span className="file-order">{String(fileIndex + 1).padStart(2, "0")}</span>
+                      <span className="file-route-line" aria-hidden="true" />
+                      <div>
+                        <strong>{file.path}</strong>
+                        <code>profiles/{profile.id}/{file.path}</code>
+                      </div>
+                      <small>{fileIndex === 0 ? t("profiles.required") : file.digest.slice(0, 8)}</small>
+                      <button className="inline-action" onClick={() => onOpen(profile.id, file.path)}>
+                        {t("profiles.open")}
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+
+                <div className="profile-output-strip">
+                  <span aria-hidden="true">{profile.files.map(() => "·").join(" ")}</span>
+                  <strong>{t("profiles.output")}</strong>
+                  <code>current/AGENTS.md</code>
+                </div>
+
+                {!editingFile && (
+                  <button
+                    className="inline-action add-file-action"
+                    disabled={Boolean(busy)}
+                    onClick={() => {
+                      setFileDraft({ profileId: profile.id, relativePath: "rules/" });
+                      setFilePlan(undefined);
+                    }}
+                  >
+                    {t("profiles.addFile")}
+                  </button>
+                )}
+
+                {editingFile && fileDraft && (
+                  <div className="pack-file-composer profile-file-composer">
+                    <div>
+                      <span>{t("profiles.addFileTitle")}</span>
+                      <code>profiles/{profile.id}/</code>
+                    </div>
+                    <input
+                      aria-label={t("profiles.addFilePath")}
+                      value={fileDraft.relativePath}
+                      onChange={(event) => {
+                        setFileDraft({ ...fileDraft, relativePath: event.target.value });
+                        setFilePlan(undefined);
+                      }}
+                    />
+                    {!filePreviewPending && (
+                      <div className="pack-file-composer-actions">
+                        <button
+                          className="button button-ghost button-small"
+                          onClick={() => setFileDraft(undefined)}
+                        >
+                          {t("libraryPlan.cancel")}
+                        </button>
+                        <button
+                          className="button button-primary button-small"
+                          disabled={!fileDraft.relativePath || Boolean(busy)}
+                          onClick={() => void previewFile(fileDraft)}
+                        >
+                          {busy === `preview-file-${profile.id}`
+                            ? t("libraryPlan.previewing")
+                            : t("profiles.addFilePreview")}
+                        </button>
+                      </div>
+                    )}
+                    {filePreviewPending && (
+                      <LibraryPlanPreview
+                        plan={filePlan.plan}
+                        confirming={busy === `add-file-${profile.id}`}
+                        confirmLabel={t("profiles.addFileConfirm")}
+                        onCancel={() => setFilePlan(undefined)}
+                        onConfirm={() => void addFile(fileDraft)}
+                      />
+                    )}
+                  </div>
+                )}
 
                 <footer>
                   <span className={`runtime-state runtime-${profile.isActive ? runtimeState : "missing"}`}>
@@ -194,7 +268,9 @@ export function ProfilesPage({
                       : t("profiles.notSelected")}
                   </span>
                   <button
-                    className={profile.isActive && runtimeState === "current" ? "button button-ghost button-small" : "button button-primary button-small"}
+                    className={profile.isActive && runtimeState === "current"
+                      ? "button button-ghost button-small"
+                      : "button button-primary button-small"}
                     disabled={busy !== undefined}
                     onClick={() => void previewActivation(profile.id)}
                   >
@@ -206,7 +282,7 @@ export function ProfilesPage({
                   </button>
                 </footer>
 
-                {pending && (
+                {activationPending && (
                   <LibraryPlanPreview
                     plan={activation.plan}
                     confirming={busy === `activate-${profile.id}`}
@@ -250,37 +326,19 @@ export function ProfilesPage({
             />
           </label>
 
-          <fieldset className="pack-selector">
-            <legend>{t("profiles.create.selectPacks")}</legend>
-            {packs.map((pack) => (
-              <label key={pack.id}>
-                <input
-                  type="checkbox"
-                  checked={draft.packIds.includes(pack.id)}
-                  onChange={() => togglePack(pack.id)}
-                />
-                <span><strong>{pack.name}</strong><code>{pack.id}</code></span>
-              </label>
-            ))}
-          </fieldset>
-
-          <div className="selected-pack-order">
-            <span>{t("profiles.create.order")}</span>
-            {draft.packIds.length === 0 && <p>{t("profiles.create.orderEmpty")}</p>}
-            {draft.packIds.map((packId, index) => (
-              <div key={packId}>
-                <span>{String(index + 1).padStart(2, "0")}</span>
-                <strong>{packById.get(packId)?.name ?? packId}</strong>
-                <button disabled={index === 0} onClick={() => movePack(index, -1)} aria-label={t("profiles.create.moveUp")}>↑</button>
-                <button disabled={index === draft.packIds.length - 1} onClick={() => movePack(index, 1)} aria-label={t("profiles.create.moveDown")}>↓</button>
-              </div>
-            ))}
+          <div className="required-entry-readout">
+            <span>01</span>
+            <div>
+              <strong>AGENTS.md</strong>
+              <small>{t("profiles.create.entrypoint")}</small>
+            </div>
+            <em>{t("profiles.required")}</em>
           </div>
 
           {!createPlan && (
             <button
               className="button button-primary composer-submit"
-              disabled={!draft.id || !draft.name || !draft.packIds.length || Boolean(busy)}
+              disabled={!draft.id || !draft.name || Boolean(busy)}
               onClick={() => void previewCreate()}
             >
               {busy === "preview-create" ? t("libraryPlan.previewing") : t("profiles.create.preview")}

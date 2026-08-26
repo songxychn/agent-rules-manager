@@ -28,16 +28,31 @@ export function LibrarySetupPanel({
   const { t } = useI18n();
   const conflict = state === "conflict";
   const legacy = state === "legacy";
+  const upgrade = state === "upgrade";
 
   return (
     <section className={`source-missing library-setup ${conflict ? "is-conflict" : ""}`}>
       <span className="setup-blueprint" aria-hidden="true">
-        <i>P</i><i>+</i><i>P</i><i>→</i><i>C</i>
+        <i>P</i><i>→</i><i>C</i>
       </span>
       <p className="eyebrow">
-        {conflict ? t("setup.conflictEyebrow") : legacy ? t("setup.legacyEyebrow") : t("setup.emptyEyebrow")}
+        {conflict
+          ? t("setup.conflictEyebrow")
+          : upgrade
+            ? t("setup.upgradeEyebrow")
+            : legacy
+              ? t("setup.legacyEyebrow")
+              : t("setup.emptyEyebrow")}
       </p>
-      <h1>{conflict ? t("setup.conflictTitle") : legacy ? t("setup.legacyTitle") : t("setup.emptyTitle")}</h1>
+      <h1>
+        {conflict
+          ? t("setup.conflictTitle")
+          : upgrade
+            ? t("setup.upgradeTitle")
+            : legacy
+              ? t("setup.legacyTitle")
+              : t("setup.emptyTitle")}
+      </h1>
       <p>{detail}</p>
       {legacySourcePath && <code className="setup-legacy-path">{legacySourcePath}</code>}
       {!conflict && !plan && (
@@ -49,7 +64,11 @@ export function LibrarySetupPanel({
         <LibraryPlanPreview
           plan={plan}
           confirming={applying}
-          confirmLabel={legacy ? t("setup.confirmImport") : t("setup.confirmCreate")}
+          confirmLabel={upgrade
+            ? t("setup.confirmUpgrade")
+            : legacy
+              ? t("setup.confirmImport")
+              : t("setup.confirmCreate")}
           onCancel={onCancel}
           onConfirm={onApply}
         />

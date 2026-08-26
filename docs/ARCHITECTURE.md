@@ -1,160 +1,141 @@
 # Architecture
 
-## Boundaries
+## State boundaries
 
 Agent Rules Manager separates four kinds of state:
 
-1. **Syncable source**: `schema.json`, `packs/**`, `profiles/**`. User-owned, provider-neutral, suitable for Git or another future transport.
+1. **Syncable source**: `schema.json` and `profiles/**`. User-owned, provider-neutral, suitable for Git or another transport.
 2. **Generated runtime**: `.runtime/<profile>-<digest>/**`. App-owned, immutable, reproducible, never synchronized.
-3. **Machine selection**: `current` plus application-state `machine.json`. Expresses which Profile this machine uses, never synchronized.
-4. **Native projections and backups**: Agent-specific files/links plus drift-safe snapshots in the platform application-state directory.
+3. **Machine selection**: `current` plus application-state `machine.json`. Selects one Profile locally, never synchronized.
+4. **Native projections and backups**: Agent-specific files or links plus drift-safe snapshots in the platform application-state directory.
 
 ```text
-                     read / validate / render
-syncable sources ──────────────────────────────────┐
-                                                   v
-React + Tauri ────────────────────────────────> arm-core <──────── CLI
-                                                   │
-          ┌─────────────────────┬──────────────────┼──────────────────┐
-          v                     v                  v                  v
- immutable runtime       local current link    native paths      local backups
+                         validate / render
+schema + profiles ────────────────────────────────┐
+                                                  v
+React + Tauri ───────────────────────────────> arm-core <──────── CLI
+                                                  │
+          ┌────────────────────┬──────────────────┼─────────────────┐
+          v                    v                  v                 v
+ immutable runtime      local current link    native paths     local backups
 ```
-
-Application state remains outside the rule library. On macOS it uses `~/Library/Application Support/agent-rules-manager`; on Linux it uses `$XDG_STATE_HOME/agent-rules-manager` or `~/.local/state/agent-rules-manager`.
 
 ## Library state machine
 
 The selected directory is classified without writing:
 
 - `empty`: absent or contains only allowed repository metadata;
-- `legacy`: no `schema.json`, with a regular root `AGENTS.md` that can be migrated through a previewed, rollback-protected transaction;
-- `ready`: a supported `schema.json` is present;
-- `conflict`: the path is not a directory, contains unmanaged entries without a schema, or uses an unsupported entry type.
+- `legacy`: no schema, with one regular root `AGENTS.md` eligible for migration;
+- `upgrade`: schema v1 using the former Rule Pack layout;
+- `ready`: supported Profile-owned schema v2;
+- `conflict`: unsafe directory shape, unsupported schema, or unsupported entry type.
 
-Invalid schema content, missing Pack files, unknown Pack ids, duplicate paths, and unsafe relative paths fail closed. Snapshot calls never silently repair the library.
+Snapshot calls never repair state. Invalid manifests, missing files, duplicate paths, unsafe paths, unmanaged migration entries, and unexpected symlinks fail closed.
 
-## Rule Pack contract
+## Profile contract
 
-A Pack directory contains a regular `pack.json` and the declared regular Markdown files. `AGENTS.md` is required as the first instruction. Supplemental files preserve manifest order.
+A Profile is a directory whose name matches `profile.json.id`. It directly owns an ordered, non-empty list of regular Markdown files. `AGENTS.md` is always first.
 
 Instruction paths must:
 
-- be relative to the Pack directory;
+- be relative to the Profile directory;
 - contain only normal path components;
 - end in lowercase `.md`;
-- be unique within the manifest;
-- resolve to regular files, not symlinks.
+- be unique in the manifest;
+- resolve to regular files, never symlinks.
 
-The initial resource type is instruction Markdown only. Skills, MCP definitions, subagents, credentials, chat history, and provider authentication are outside this contract. Future resource types need their own validation and adapter capability model; they must not be smuggled into instruction-file semantics.
+The current resource type is neutral instruction Markdown. Skills, MCP definitions, subagents, credentials, chat history, and provider authentication are outside this contract.
 
-## Profile and renderer contract
+## Renderer contract
 
-A Profile is an ordered, non-empty list of unique known Pack ids. Rendering walks:
-
-1. Profile Pack order;
-2. each Pack's instruction order.
-
-The output starts with a generated-file warning and emits a source marker before every file:
+Rendering walks one Profile's `instructions` in manifest order. Output starts with a generated warning and includes a logical marker before every source:
 
 ```markdown
-<!-- Generated by Agent Rules Manager. Edit Rule Pack sources, not this file. -->
+<!-- Generated by Agent Rules Manager. Edit Profile sources, not this file. -->
 <!-- Profile: work -->
 
-<!-- Source: packs/base/AGENTS.md -->
+<!-- Source: profiles/work/AGENTS.md -->
 ...
 
-<!-- Source: packs/work/rules/review.md -->
+<!-- Source: profiles/work/rules/review.md -->
 ...
 ```
 
-The renderer hashes logical source paths and exact source contents. It writes to a staging directory, writes `AGENTS.md` plus `manifest.json`, then renames the directory to `.runtime/<profile>-<digest>`. Existing runtime directories are reused only if both files match exactly; otherwise activation is blocked.
+The Profile digest includes logical paths and exact contents. A content or path change selects a different `.runtime/<profile>-<digest>` directory. Runtime files are part of the same rollback-protected transaction as `current` and `machine.json`; an existing runtime with unexpected contents blocks activation.
 
-Source changes make the selected Runtime `stale`. Refreshing is an explicit previewed activation of the same Profile. Read-only snapshot/focus refresh does not write a new Runtime.
+Source changes make the selected Runtime `stale`. Refreshing is an explicit previewed activation of the same Profile. Read-only snapshots and focus refreshes never generate output.
 
 ## Stable projection entrypoint
 
-`current` is a relative directory symlink such as:
+`current` is a relative directory symlink:
 
 ```text
 current -> .runtime/work-8d9f20b751a4
 ```
 
-Native adapters receive the logical absolute path `<library>/current/AGENTS.md`, not the canonicalized Runtime path. This distinction is essential: switching Profile atomically changes `current` while native Agent connections remain stable.
+Adapters receive `<library>/current/AGENTS.md`, not a canonicalized Runtime path. Switching Profile changes `current` while native Agent links remain stable.
 
-Only a missing `current` entry or a symlink whose normalized target is inside the library's `.runtime` directory is managed. A regular file, directory, or foreign symlink blocks activation.
-
-The active Profile id is stored in application-state `machine.json`. Activation changes `current` and `machine.json` in one rollback-protected transaction. This selection is deliberately absent from the syncable Profile documents.
+Only a missing `current` entry or a symlink resolving inside this library's `.runtime` directory is managed. A regular file, directory, or foreign symlink blocks activation. The active Profile id lives in machine-local application state, never in a syncable manifest.
 
 ## Adapter contract
 
-An adapter declares an id, label, native target path, deployment mode, command names, and configuration-directory markers. Detection accepts either a command found on `PATH` or an existing marker because GUI processes often inherit a reduced `PATH`.
+An adapter declares an id, label, native target path, command names, and configuration markers. Detection accepts a command on `PATH` or an existing marker because GUI processes often inherit a reduced `PATH`.
 
-- `symlink`: the connection created by every default adapter. Connecting is valid only when the target is absent, already links to `current/AGENTS.md`, points to the recorded pre-migration root path, or contains only a legacy managed include.
-- `independent`: a regular native file is a valid disconnected state. Disconnect replaces a managed link with the current Profile content so the Agent keeps working without future Profile switches.
-- `include`: recognized only as a legacy connection. Disconnect replaces the owned block with current Profile content while preserving surrounding provider-specific instructions; malformed markers are never guessed at.
+- Connecting may create a symlink only when the target is missing or already recognized as managed.
+- A regular native file is a valid independent state and is never overwritten by connection apply.
+- Disconnecting a managed link materializes the current Profile content as an independent regular file.
+- A legacy managed include is recognized only for safe detach or migration; malformed markers are never guessed at.
 
-Each mode implements:
-
-1. detect the installation without reading authentication or session data;
-2. inspect the target kind (`missing`, `connectedLink`, `legacyLink`, `independentFile`, legacy include, or conflict) and state;
-3. derive the exact desired file state without writing;
-4. apply atomically where the platform permits and verify the written state;
-5. restore only when current state still equals the expected applied or original state.
-
-Agent-specific instructions belong outside syncable neutral Pack content or in a future explicitly typed adapter resource.
+Every adapter must inspect without reading authentication data, derive a complete desired state before mutation, verify its write, and restore only when the target still equals the expected applied or original state.
 
 ## Transaction and rollback model
 
-Both library mutations and native projections use optimistic, fail-closed transactions:
+Library mutations and native projections use optimistic, fail-closed transactions:
 
-1. resolve ids and validate the current model;
-2. produce a preview plan and reject the complete operation before an independent file or conflict could be overwritten;
-3. re-read all original file states;
-4. persist originals plus desired digests before the first target mutation;
-5. apply each prepared target and verify it;
-6. on failure, restore only completed targets still equal to the desired state;
+1. validate ids and current model;
+2. produce a complete preview and reject conflicts before writing;
+3. re-read every target's original state;
+4. persist originals, desired digests, and directories that do not yet exist;
+5. apply each target and verify its exact state;
+6. on failure, restore completed targets that still equal the expected state;
 7. retain the snapshot for explicit rollback.
 
-Rollback accepts a path only when it still matches the expected applied state or its exact original state. Any third state is post-apply drift and blocks the complete rollback.
+Rollback accepts a target only when it still matches the expected applied state or exact original state. A third state is post-apply drift and blocks the complete rollback. It removes only directories recorded as absent before apply and still empty at rollback time; directories containing later user data remain untouched.
 
-Generated Runtime directories are reproducible content-addressed caches. They are never used as backup storage and never contain user-only source content that is not already present in a Pack.
+## v1 upgrade contract
+
+Schema v1 is treated as an import format, not an active public abstraction:
+
+- each legacy Profile receives exact copies of its referenced sources in legacy render order;
+- the first source becomes `AGENTS.md`; later sources receive deterministic Profile-relative paths;
+- old sources and manifests are removed only inside the same backed-up transaction;
+- any unused legacy Pack, undeclared Pack entry, symlink, or target collision blocks the complete upgrade;
+- the existing machine Profile selection is reused and rendered after migration;
+- rollback restores v1 files and removes only empty directories created by migration.
 
 ## External editing boundary
 
-The WebView can ask to open only a source declared by a known Pack, identified by `(pack_id, relative_path)`, and a fixed open-target id returned by the backend. The Rust core revalidates Pack membership and the Tauri backend verifies a regular file before launching a platform adapter. The WebView never submits an executable or arbitrary absolute path.
+The WebView may request only a source declared by a known Profile, identified by `(profile_id, relative_path)`, plus a fixed open-target id returned by the backend. The core revalidates membership and the Tauri layer verifies a regular file before invoking a platform adapter. The WebView never submits an executable or arbitrary absolute path.
 
-Browser mode uses representative in-memory data. Its create, append, switch, and rollback actions mutate only that in-memory snapshot.
+Browser mode uses representative in-memory data. Create, append, activate, and rollback actions mutate only that snapshot.
 
 ## Multi-machine transport contract
 
-The future transport receives an explicit allowlist:
+Future transport receives this allowlist:
 
 ```text
 schema.json
-packs/**
 profiles/**
 ```
 
-It must exclude:
+It must exclude `.runtime/**`, `current`, all application state, native Agent paths, backups, credentials, and provider authentication. Conflicts remain visible; system Git/SSH or another transport owns authentication.
 
-```text
-.runtime/**
-current
-machine.json and all application state
-native Agent paths
-backups
-credentials and provider authentication
-```
+## Extension points
 
-Git integration should expose fetch/pull/merge/push as observable states and never resolve source conflicts by overwriting local content. Authentication stays with system Git/SSH or a credential helper. The library format and local activation logic do not depend on Git, so Syncthing/chezmoi/manual copy remain possible transports.
-
-## Near-term extension points
-
-- Git remote configuration and explicit multi-machine synchronization;
-- edit/rename/delete flows for Pack and Profile metadata with the same transaction contract;
-- configuration file for custom agents, detection signals, and target paths;
-- explicit import or archive flow for connecting an existing independent rule file;
-- optional custom editor registration with the same fixed-id command boundary;
-- Windows junction/copy strategy with platform-specific guarantees;
+- explicit Git fetch/pull/merge/push;
+- edit, rename, delete, and reorder Profile sources under the same transaction contract;
+- configurable agent detection and target paths;
+- controlled import or archive for independent native rules;
 - typed resources beyond instruction Markdown;
+- Windows-specific junction or copy guarantees;
 - signed desktop releases and updater metadata.

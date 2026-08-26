@@ -1,4 +1,4 @@
-type AppIconName = "control" | "rules" | "profiles" | "settings" | "folder" | "rollback";
+type AppIconName = "control" | "profiles" | "settings" | "folder" | "rollback";
 
 export function BrandMark() {
   return (
@@ -20,12 +20,6 @@ export function AppIcon({ name }: { name: AppIconName }) {
           <rect x="14" y="4" width="6" height="6" rx="1.5" />
           <rect x="4" y="14" width="6" height="6" rx="1.5" />
           <rect x="14" y="14" width="6" height="6" rx="1.5" />
-        </>
-      )}
-      {name === "rules" && (
-        <>
-          <path d="m5 8 7-4 7 4-7 4Z" />
-          <path d="m5 12 7 4 7-4M5 16l7 4 7-4" />
         </>
       )}
       {name === "profiles" && (

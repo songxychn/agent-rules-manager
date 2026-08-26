@@ -1,7 +1,7 @@
 use crate::{
-    default_adapters, library, AgentAdapter, AgentStatus, ApplyOutcome, ArmError,
-    ConnectionChange, DeployMode, LibraryMutationOutcome, LibraryPlan, PlanStep, ProjectionPlan,
-    RollbackOutcome, TargetKind, TargetState, WorkspaceSnapshot,
+    default_adapters, library, AgentAdapter, AgentStatus, ApplyOutcome, ArmError, ConnectionChange,
+    DeployMode, LibraryMutationOutcome, LibraryPlan, PlanStep, ProjectionPlan, RollbackOutcome,
+    TargetKind, TargetState, WorkspaceSnapshot,
 };
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
@@ -95,53 +95,13 @@ impl RulesManager {
         library::initialize(&self.library_root, &self.state_root)
     }
 
-    pub fn plan_create_pack(
-        &self,
-        id: &str,
-        name: &str,
-        description: &str,
-    ) -> Result<LibraryPlan, ArmError> {
-        library::plan_create_pack(&self.library_root, id, name, description)
-    }
-
-    pub fn create_pack(
-        &self,
-        id: &str,
-        name: &str,
-        description: &str,
-    ) -> Result<LibraryMutationOutcome, ArmError> {
-        library::create_pack(&self.library_root, &self.state_root, id, name, description)
-    }
-
-    pub fn plan_add_pack_file(
-        &self,
-        pack_id: &str,
-        relative_path: &str,
-    ) -> Result<LibraryPlan, ArmError> {
-        library::plan_add_pack_file(&self.library_root, pack_id, relative_path)
-    }
-
-    pub fn add_pack_file(
-        &self,
-        pack_id: &str,
-        relative_path: &str,
-    ) -> Result<LibraryMutationOutcome, ArmError> {
-        library::add_pack_file(
-            &self.library_root,
-            &self.state_root,
-            pack_id,
-            relative_path,
-        )
-    }
-
     pub fn plan_create_profile(
         &self,
         id: &str,
         name: &str,
         description: &str,
-        pack_ids: &[String],
     ) -> Result<LibraryPlan, ArmError> {
-        library::plan_create_profile(&self.library_root, id, name, description, pack_ids)
+        library::plan_create_profile(&self.library_root, id, name, description)
     }
 
     pub fn create_profile(
@@ -149,15 +109,28 @@ impl RulesManager {
         id: &str,
         name: &str,
         description: &str,
-        pack_ids: &[String],
     ) -> Result<LibraryMutationOutcome, ArmError> {
-        library::create_profile(
+        library::create_profile(&self.library_root, &self.state_root, id, name, description)
+    }
+
+    pub fn plan_add_profile_file(
+        &self,
+        profile_id: &str,
+        relative_path: &str,
+    ) -> Result<LibraryPlan, ArmError> {
+        library::plan_add_profile_file(&self.library_root, profile_id, relative_path)
+    }
+
+    pub fn add_profile_file(
+        &self,
+        profile_id: &str,
+        relative_path: &str,
+    ) -> Result<LibraryMutationOutcome, ArmError> {
+        library::add_profile_file(
             &self.library_root,
             &self.state_root,
-            id,
-            name,
-            description,
-            pack_ids,
+            profile_id,
+            relative_path,
         )
     }
 
@@ -165,19 +138,16 @@ impl RulesManager {
         library::plan_activate_profile(&self.library_root, &self.state_root, profile_id)
     }
 
-    pub fn activate_profile(
-        &self,
-        profile_id: &str,
-    ) -> Result<LibraryMutationOutcome, ArmError> {
+    pub fn activate_profile(&self, profile_id: &str) -> Result<LibraryMutationOutcome, ArmError> {
         library::activate_profile(&self.library_root, &self.state_root, profile_id)
     }
 
     pub fn rule_source_path(
         &self,
-        pack_id: &str,
+        profile_id: &str,
         relative_path: &str,
     ) -> Result<PathBuf, ArmError> {
-        library::rule_source_path(&self.library_root, pack_id, relative_path)
+        library::rule_source_path(&self.library_root, profile_id, relative_path)
     }
 
     pub fn rollback_library_latest(&self) -> Result<RollbackOutcome, ArmError> {
@@ -210,7 +180,6 @@ impl RulesManager {
             legacy_source_path: library
                 .legacy_source_path
                 .map(|path| path.display().to_string()),
-            packs: library.packs,
             profiles: library.profiles,
             latest_backup: self.latest_backup_path()?.and_then(|path| {
                 path.file_stem()
@@ -256,15 +225,13 @@ impl RulesManager {
             let status = self.inspect_adapter(adapter, &source_path, legacy_source)?;
             let desired_connected = requested[&adapter.id];
             let (action, summary) = match (desired_connected, status.target_kind) {
-                (true, TargetKind::ConnectedLink) => {
-                    ("none", "Already links to the stable current rules entrypoint.")
-                }
+                (true, TargetKind::ConnectedLink) => (
+                    "none",
+                    "Already links to the stable current rules entrypoint.",
+                ),
                 (true, TargetKind::Missing) => {
                     change_count += 1;
-                    (
-                        "createLink",
-                        "Create a symbolic link to current/AGENTS.md.",
-                    )
+                    ("createLink", "Create a symbolic link to current/AGENTS.md.")
                 }
                 (true, TargetKind::LegacyLink) => {
                     change_count += 1;
@@ -404,13 +371,8 @@ impl RulesManager {
                 .iter()
                 .find(|adapter| adapter.id == step.agent_id)
                 .ok_or_else(|| ArmError::UnknownAgent(step.agent_id.clone()))?;
-            let desired = desired_connection_state(
-                adapter,
-                &source,
-                legacy_source,
-                &original,
-                &step.action,
-            )?;
+            let desired =
+                desired_connection_state(adapter, &source, legacy_source, &original, &step.action)?;
             prepared.push(PreparedChange {
                 agent_id: step.agent_id.clone(),
                 path,
@@ -447,7 +409,8 @@ impl RulesManager {
                 let _ = restore_prepared_changes(&prepared[..index]);
                 return Err(ArmError::ApplyDrift(change.path.display().to_string()));
             }
-            if let Err(error) = replace_file_state(&change.path, &change.original, &change.desired) {
+            if let Err(error) = replace_file_state(&change.path, &change.original, &change.desired)
+            {
                 if restore_prepared_changes(&prepared[..index]) {
                     let _ = self.archive_backup(&backup_path);
                 }
@@ -645,8 +608,8 @@ fn absolute_logical_path(path: &Path) -> Result<PathBuf, ArmError> {
     if path.is_absolute() {
         return Ok(path.to_path_buf());
     }
-    let current = env::current_dir()
-        .map_err(|error| ArmError::io(path.display().to_string(), error))?;
+    let current =
+        env::current_dir().map_err(|error| ArmError::io(path.display().to_string(), error))?;
     Ok(current.join(path))
 }
 
@@ -711,10 +674,7 @@ fn detect_adapter(adapter: &AgentAdapter) -> (bool, String) {
 
     for command in &adapter.command_names {
         if let Some(path) = find_command(command) {
-            return (
-                true,
-                format!("Detected {command} at {}.", path.display()),
-            );
+            return (true, format!("Detected {command} at {}.", path.display()));
         }
     }
 
@@ -776,8 +736,7 @@ fn inspect_projection_target(
                     kind: TargetKind::LegacyLink,
                     connected: true,
                     mode: DeployMode::Symlink,
-                    detail: "The managed link still points to the migrated root AGENTS.md."
-                        .into(),
+                    detail: "The managed link still points to the migrated root AGENTS.md.".into(),
                 })
             } else {
                 Ok(TargetInspection {
@@ -817,8 +776,7 @@ fn inspect_projection_target(
                 kind: TargetKind::InvalidManagedFile,
                 connected: false,
                 mode: DeployMode::Include,
-                detail: "Managed block markers are incomplete, duplicated, or out of order."
-                    .into(),
+                detail: "Managed block markers are incomplete, duplicated, or out of order.".into(),
             }),
         },
     }
@@ -874,7 +832,8 @@ fn replace_file_state(
         }
         (FileState::File { .. }, FileState::File { content }) => write_atomic(path, content),
         (FileState::Symlink { .. }, FileState::File { content }) => {
-            fs::remove_file(path).map_err(|error| ArmError::io(path.display().to_string(), error))?;
+            fs::remove_file(path)
+                .map_err(|error| ArmError::io(path.display().to_string(), error))?;
             if let Err(error) = write_atomic(path, content) {
                 let _ = restore_file_state(path, original);
                 return Err(error);
@@ -882,7 +841,8 @@ fn replace_file_state(
             Ok(())
         }
         (FileState::File { .. } | FileState::Symlink { .. }, FileState::Symlink { target }) => {
-            fs::remove_file(path).map_err(|error| ArmError::io(path.display().to_string(), error))?;
+            fs::remove_file(path)
+                .map_err(|error| ArmError::io(path.display().to_string(), error))?;
             if let Err(error) = create_symlink(Path::new(target), path) {
                 let _ = restore_file_state(path, original);
                 return Err(error);
@@ -926,9 +886,9 @@ fn desired_connection_state(
                     adapter.target_path.display().to_string(),
                 ));
             };
-            if !legacy_source.is_some_and(|legacy| {
-                symlink_state_points_to(&adapter.target_path, target, legacy)
-            }) {
+            if !legacy_source
+                .is_some_and(|legacy| symlink_state_points_to(&adapter.target_path, target, legacy))
+            {
                 return Err(ArmError::ApplyDrift(
                     adapter.target_path.display().to_string(),
                 ));
@@ -968,9 +928,8 @@ fn desired_connection_state(
                     adapter.target_path.display().to_string(),
                 ));
             };
-            let Some((start, end)) = managed_include_span(content).map_err(|()| {
-                ArmError::ApplyDrift(adapter.target_path.display().to_string())
-            })?
+            let Some((start, end)) = managed_include_span(content)
+                .map_err(|()| ArmError::ApplyDrift(adapter.target_path.display().to_string()))?
             else {
                 return Err(ArmError::ApplyDrift(
                     adapter.target_path.display().to_string(),
@@ -1151,7 +1110,7 @@ mod tests {
         manager.initialize().expect("import");
         assert!(!legacy.exists());
         assert_eq!(
-            fs::read_to_string(library.join("packs/base/AGENTS.md")).unwrap(),
+            fs::read_to_string(library.join("profiles/default/AGENTS.md")).unwrap(),
             "# Existing rules\n"
         );
         let snapshot = manager.snapshot().expect("snapshot");
@@ -1210,7 +1169,10 @@ mod tests {
             .expect("disconnect qwen");
 
         assert!(!qwen.is_symlink());
-        assert_eq!(fs::read_to_string(&qwen).unwrap(), fs::read_to_string(source).unwrap());
+        assert_eq!(
+            fs::read_to_string(&qwen).unwrap(),
+            fs::read_to_string(source).unwrap()
+        );
 
         manager.rollback_latest().expect("rollback disconnect");
         assert!(qwen.is_symlink());
@@ -1255,7 +1217,10 @@ mod tests {
             .find(|agent| agent.id == "qwen")
             .expect("qwen adapter");
         assert!(qwen.installed);
-        assert_eq!(qwen.target_path, home.join(".qwen/QWEN.md").display().to_string());
+        assert_eq!(
+            qwen.target_path,
+            home.join(".qwen/QWEN.md").display().to_string()
+        );
     }
 
     #[test]

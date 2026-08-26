@@ -5,7 +5,7 @@ Thanks for helping improve Agent Rules Manager.
 ## Development
 
 1. Open an issue before making a behavior or safety-model change.
-2. Keep Rule Pack instruction content provider-neutral; add provider details to adapters.
+2. Keep Profile instruction content provider-neutral; add provider details to adapters.
 3. Add a regression test for every filesystem edge case.
 4. Run `cargo test --workspace`, `bun run test`, and `bun run build` before opening a pull request.
 

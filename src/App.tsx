@@ -3,7 +3,6 @@ import { AppIcon, BrandMark } from "./components/AppIcon";
 import { LibrarySetupPanel } from "./components/LibrarySetupPanel";
 import { ProfilesPage } from "./components/ProfilesPage";
 import { ProjectionRail } from "./components/ProjectionRail";
-import { RulePacksPage } from "./components/RulePacksPage";
 import { SettingsPage } from "./components/SettingsPage";
 import { SourceOpenControl } from "./components/SourceOpenControl";
 import { backend } from "./lib/backend";
@@ -13,15 +12,14 @@ import type {
   ConnectionChange,
   LibraryPlan,
   OpenTarget,
-  PackDraft,
-  PackFileDraft,
   ProfileDraft,
+  ProfileFileDraft,
   ProjectionPlan,
   WorkspaceSnapshot,
 } from "./lib/types";
 import "./styles.css";
 
-type View = "control" | "packs" | "profiles" | "settings";
+type View = "control" | "profiles" | "settings";
 type Notice = { tone: "success" | "error" | "info"; message: string };
 
 function workspaceFingerprint(snapshot: WorkspaceSnapshot | undefined): string {
@@ -34,11 +32,11 @@ function workspaceFingerprint(snapshot: WorkspaceSnapshot | undefined): string {
     sourceExists: snapshot.sourceExists,
     sourceDigest: snapshot.sourceDigest,
     sourceModifiedAt: snapshot.sourceModifiedAt,
-    packs: snapshot.packs.map((pack) => [
-      pack.id,
-      pack.files.map((file) => [file.path, file.digest]),
+    profiles: snapshot.profiles.map((profile) => [
+      profile.id,
+      profile.files.map((file) => [file.path, file.digest]),
+      profile.isActive,
     ]),
-    profiles: snapshot.profiles.map((profile) => [profile.id, profile.packIds, profile.isActive]),
     agents: snapshot.agents.map((agent) => [
       agent.id,
       agent.targetPath,
@@ -236,7 +234,7 @@ function App() {
 
   const openRuleSource = async (
     targetId: string,
-    packId: string,
+    profileId: string,
     relativePath: string,
   ) => {
     const target = openTargets.find((candidate) => candidate.id === targetId);
@@ -245,7 +243,7 @@ function App() {
     writePreferredOpenTarget(targetId);
     setOpeningTargetId(targetId);
     try {
-      const opened = await backend.openRuleSource(targetId, packId, relativePath, libraryRoot);
+      const opened = await backend.openRuleSource(targetId, profileId, relativePath, libraryRoot);
       setNotice(
         opened
           ? {
@@ -264,29 +262,26 @@ function App() {
     }
   };
 
-  const openPackFile = (packId: string, relativePath: string) => {
+  const openProfileFile = (profileId: string, relativePath: string) => {
     const targetId = openTargets.some((target) => target.id === preferredOpenTarget)
       ? preferredOpenTarget
       : openTargets[0]?.id;
-    if (targetId) void openRuleSource(targetId, packId, relativePath);
-  };
-
-  const createPack = async (draft: PackDraft) => {
-    await backend.createPack(draft, libraryRoot);
-    await loadSnapshot(libraryRoot);
-    setNotice({ tone: "success", message: t("notice.packCreated", { name: draft.name }) });
-  };
-
-  const addPackFile = async (draft: PackFileDraft) => {
-    await backend.addPackFile(draft, libraryRoot);
-    await loadSnapshot(libraryRoot);
-    setNotice({ tone: "success", message: t("notice.packFileAdded", { path: draft.relativePath }) });
+    if (targetId) void openRuleSource(targetId, profileId, relativePath);
   };
 
   const createProfile = async (draft: ProfileDraft) => {
     await backend.createProfile(draft, libraryRoot);
     await loadSnapshot(libraryRoot);
     setNotice({ tone: "success", message: t("notice.profileCreated", { name: draft.name }) });
+  };
+
+  const addProfileFile = async (draft: ProfileFileDraft) => {
+    await backend.addProfileFile(draft, libraryRoot);
+    await loadSnapshot(libraryRoot);
+    setNotice({
+      tone: "success",
+      message: t("notice.profileFileAdded", { path: draft.relativePath }),
+    });
   };
 
   const activateProfile = async (profileId: string) => {
@@ -314,44 +309,29 @@ function App() {
   const connected = installed.filter((agent) => agent.connected).length;
   const pendingChanges = connectionChanges(snapshot, desiredConnections);
   const activeProfile = snapshot.profiles.find((profile) => profile.isActive);
-  const activePackIds = activeProfile?.packIds ?? [];
-  const activePack = snapshot.packs.find((pack) => pack.id === activePackIds[0]);
-  const activeFile = activePack?.files.find((file) => file.path === "AGENTS.md") ?? activePack?.files[0];
-  const pageTitle = t(`nav.${view === "packs" ? "rulePacks" : view}` as "nav.control");
+  const activeFile = activeProfile?.files.find((file) => file.path === "AGENTS.md")
+    ?? activeProfile?.files[0];
+  const pageTitle = t(`nav.${view}` as "nav.control");
   const pageCount =
     view === "control"
       ? snapshot.agents.length
-      : view === "packs"
-        ? snapshot.packs.length
-        : view === "profiles"
-          ? snapshot.profiles.length
-          : undefined;
+      : view === "profiles"
+        ? snapshot.profiles.length
+        : undefined;
 
   const renderReadyView = () => {
     if (view === "settings") return <SettingsPage />;
-    if (view === "packs") {
-      return (
-        <RulePacksPage
-          packs={snapshot.packs}
-          activePackIds={activePackIds}
-          legacySourcePath={snapshot.legacySourcePath}
-          onOpen={openPackFile}
-          onPreviewCreate={(draft) => backend.previewCreatePack(draft, libraryRoot)}
-          onCreate={createPack}
-          onPreviewAddFile={(draft) => backend.previewAddPackFile(draft, libraryRoot)}
-          onAddFile={addPackFile}
-        />
-      );
-    }
     if (view === "profiles") {
       return (
         <ProfilesPage
           profiles={snapshot.profiles}
-          packs={snapshot.packs}
           runtimeState={snapshot.runtimeState}
           latestLibraryBackup={snapshot.latestLibraryBackup}
+          onOpen={openProfileFile}
           onPreviewCreate={(draft) => backend.previewCreateProfile(draft, libraryRoot)}
           onCreate={createProfile}
+          onPreviewAddFile={(draft) => backend.previewAddProfileFile(draft, libraryRoot)}
+          onAddFile={addProfileFile}
           onPreviewActivate={(profileId) => backend.previewActivateProfile(profileId, libraryRoot)}
           onActivate={activateProfile}
           onRollback={rollbackLibrary}
@@ -408,17 +388,15 @@ function App() {
         </div>
 
         <div className="nav-primary">
-          {(["control", "packs", "profiles"] as const).map((item) => (
+          {(["control", "profiles"] as const).map((item) => (
             <button
               className={`nav-item ${view === item ? "is-active" : ""}`}
               aria-current={view === item ? "page" : undefined}
               onClick={() => setView(item)}
               key={item}
             >
-              <span className="nav-icon">
-                <AppIcon name={item === "packs" ? "rules" : item} />
-              </span>
-              {t(`nav.${item === "packs" ? "rulePacks" : item}` as "nav.control")}
+              <span className="nav-icon"><AppIcon name={item} /></span>
+              {t(`nav.${item}` as "nav.control")}
             </button>
           ))}
         </div>
@@ -488,14 +466,12 @@ function App() {
                 {busy === "rollback" ? t("rollback.restoring") : t("rollback.latest")}
               </button>
             )}
-            {view === "control" && activePack && activeFile && snapshot.sourceExists && (
+            {view === "control" && activeProfile && activeFile && snapshot.sourceExists && (
               <SourceOpenControl
                 targets={openTargets}
                 preferredTargetId={preferredOpenTarget}
                 openingTargetId={openingTargetId}
-                onOpen={(targetId) =>
-                  void openRuleSource(targetId, activePack.id, activeFile.path)
-                }
+                onOpen={(targetId) => void openRuleSource(targetId, activeProfile.id, activeFile.path)}
               />
             )}
           </div>

@@ -1,6 +1,6 @@
 use crate::{
     ArmError, LibraryMutationOutcome, LibraryPlan, LibraryPlanStep, LibraryState, ProfileSummary,
-    RollbackOutcome, RuleFileSummary, RulePackSummary, RuntimeState,
+    RollbackOutcome, RuleFileSummary, RuntimeState,
 };
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -9,7 +9,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
-const SCHEMA_VERSION: u32 = 1;
+const LIBRARY_SCHEMA_VERSION: u32 = 2;
+const LEGACY_LIBRARY_SCHEMA_VERSION: u32 = 1;
+const MACHINE_SCHEMA_VERSION: u32 = 1;
+const RUNTIME_SCHEMA_VERSION: u32 = 2;
 const SCHEMA_FILE: &str = "schema.json";
 const PACKS_DIR: &str = "packs";
 const PROFILES_DIR: &str = "profiles";
@@ -18,6 +21,7 @@ const CURRENT_LINK: &str = "current";
 const MACHINE_FILE: &str = "machine.json";
 const LEGACY_SOURCE_FILE: &str = "AGENTS.md";
 const PACK_MANIFEST_FILE: &str = "pack.json";
+const PROFILE_MANIFEST_FILE: &str = "profile.json";
 const ENTRYPOINT_FILE: &str = "AGENTS.md";
 
 const STARTER_RULES: &str = r#"# Shared agent rules
@@ -46,7 +50,6 @@ pub(crate) struct LibraryInspection {
     pub active_source_path: Option<PathBuf>,
     pub legacy_source_path: Option<PathBuf>,
     pub legacy_adapter_source_path: Option<PathBuf>,
-    pub packs: Vec<RulePackSummary>,
     pub profiles: Vec<ProfileSummary>,
 }
 
@@ -70,7 +73,7 @@ struct SyncPolicy {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
-struct PackDocument {
+struct LegacyPackDocument {
     schema_version: u32,
     id: String,
     name: String,
@@ -82,6 +85,17 @@ struct PackDocument {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct ProfileDocument {
+    schema_version: u32,
+    id: String,
+    name: String,
+    #[serde(default)]
+    description: String,
+    instructions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct LegacyProfileDocument {
     schema_version: u32,
     id: String,
     name: String,
@@ -100,7 +114,6 @@ struct MachineDocument {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 struct RuntimeSource {
-    pack_id: String,
     path: String,
     digest: String,
 }
@@ -112,14 +125,32 @@ struct RuntimeManifest {
     profile_id: String,
     profile_digest: String,
     rendered_digest: String,
-    packs: Vec<String>,
     sources: Vec<RuntimeSource>,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct RuntimeProfileReference {
+    profile_id: String,
+}
+
 #[derive(Debug, Clone)]
-struct LoadedPack {
-    document: PackDocument,
+struct LoadedProfile {
+    document: ProfileDocument,
     files: Vec<LoadedRuleFile>,
+}
+
+#[derive(Debug, Clone)]
+struct LoadedLegacyPack {
+    document: LegacyPackDocument,
+    files: Vec<LoadedRuleFile>,
+}
+
+#[derive(Debug, Clone)]
+struct LoadedLegacyLibrary {
+    schema: SchemaDocument,
+    packs: BTreeMap<String, LoadedLegacyPack>,
+    profiles: BTreeMap<String, LegacyProfileDocument>,
 }
 
 #[derive(Debug, Clone)]
@@ -133,8 +164,7 @@ struct LoadedRuleFile {
 
 #[derive(Debug, Clone)]
 struct LoadedLibrary {
-    packs: BTreeMap<String, LoadedPack>,
-    profiles: BTreeMap<String, ProfileDocument>,
+    profiles: BTreeMap<String, LoadedProfile>,
     legacy_source_hint: Option<String>,
 }
 
@@ -168,6 +198,8 @@ struct BackupSnapshot {
     created_at: String,
     operation: String,
     entries: Vec<BackupEntry>,
+    #[serde(default)]
+    created_directories: Vec<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -175,6 +207,13 @@ struct PreparedChange {
     path: PathBuf,
     original: FileState,
     desired: FileState,
+}
+
+#[derive(Debug, Clone)]
+struct PreparedMigration {
+    changes: Vec<PreparedChange>,
+    steps: Vec<LibraryPlanStep>,
+    loaded: LoadedLibrary,
 }
 
 pub(crate) fn source_path(library_root: &Path) -> PathBuf {
@@ -188,6 +227,15 @@ pub(crate) fn inspect(
     let source = source_path(library_root);
     let legacy = regular_file(library_root.join(LEGACY_SOURCE_FILE))?;
     let (state, detail) = detect_library_state(library_root)?;
+    let upgrade_legacy_adapter = if state == LibraryState::Upgrade {
+        let schema: SchemaDocument = read_json(&library_root.join(SCHEMA_FILE))?;
+        schema
+            .legacy_source
+            .as_ref()
+            .map(|relative| library_root.join(relative))
+    } else {
+        None
+    };
     if state != LibraryState::Ready {
         return Ok(LibraryInspection {
             state,
@@ -200,8 +248,7 @@ pub(crate) fn inspect(
             active_profile_id: None,
             active_source_path: None,
             legacy_source_path: legacy.clone(),
-            legacy_adapter_source_path: legacy,
-            packs: Vec::new(),
+            legacy_adapter_source_path: legacy.or(upgrade_legacy_adapter),
             profiles: Vec::new(),
         });
     }
@@ -214,7 +261,9 @@ pub(crate) fn inspect(
             .map(|relative| library_root.join(relative))
     });
     let machine = read_machine(state_root)?;
-    let active_profile_id = machine.as_ref().map(|value| value.active_profile_id.clone());
+    let active_profile_id = machine
+        .as_ref()
+        .map(|value| value.active_profile_id.clone());
     let mut runtime_state = RuntimeState::Missing;
     let mut active_source_path = None;
     let runtime_detail;
@@ -224,36 +273,38 @@ pub(crate) fn inspect(
             .profiles
             .get(active_id)
             .ok_or_else(|| ArmError::UnknownProfile(active_id.clone()))?;
-        let rendered = render_profile(&loaded, profile)?;
-        active_source_path = profile
-            .packs
-            .first()
-            .and_then(|pack_id| loaded.packs.get(pack_id))
-            .and_then(|pack| pack.files.first())
-            .map(|file| file.path.clone());
+        let rendered = render_profile(profile)?;
+        active_source_path = profile.files.first().map(|file| file.path.clone());
         runtime_state = inspect_current(library_root, &rendered)?;
         runtime_detail = match runtime_state {
-            RuntimeState::Current => format!("Profile `{active_id}` is rendered and selected on this machine."),
-            RuntimeState::Missing => format!("Profile `{active_id}` is selected but has not been rendered."),
-            RuntimeState::Stale => format!("Profile `{active_id}` changed after the current runtime was rendered."),
+            RuntimeState::Current => {
+                format!("Profile `{active_id}` is rendered and selected on this machine.")
+            }
+            RuntimeState::Missing => {
+                format!("Profile `{active_id}` is selected but has not been rendered.")
+            }
+            RuntimeState::Stale => {
+                format!("Profile `{active_id}` changed after the current runtime was rendered.")
+            }
             RuntimeState::Conflict => "The `current` entry is not a managed runtime link.".into(),
         };
     } else if path_entry_exists(&library_root.join(CURRENT_LINK))? {
         runtime_state = RuntimeState::Conflict;
-        runtime_detail = "A `current` entry exists without a machine-local profile selection.".into();
+        runtime_detail =
+            "A `current` entry exists without a machine-local profile selection.".into();
     } else {
         runtime_detail = "Choose a profile for this machine before connecting agents.".into();
     }
 
     let (source_exists, source_digest, source_modified_at) = inspect_rendered_source(&source)?;
-    let packs = loaded
-        .packs
+    let profiles = loaded
+        .profiles
         .values()
-        .map(|pack| RulePackSummary {
-            id: pack.document.id.clone(),
-            name: pack.document.name.clone(),
-            description: pack.document.description.clone(),
-            files: pack
+        .map(|profile| ProfileSummary {
+            id: profile.document.id.clone(),
+            name: profile.document.name.clone(),
+            description: profile.document.description.clone(),
+            files: profile
                 .files
                 .iter()
                 .map(|file| RuleFileSummary {
@@ -262,17 +313,7 @@ pub(crate) fn inspect(
                     modified_at: file.modified_at.clone(),
                 })
                 .collect(),
-        })
-        .collect();
-    let profiles = loaded
-        .profiles
-        .values()
-        .map(|profile| ProfileSummary {
-            id: profile.id.clone(),
-            name: profile.name.clone(),
-            description: profile.description.clone(),
-            pack_ids: profile.packs.clone(),
-            is_active: active_profile_id.as_deref() == Some(profile.id.as_str()),
+            is_active: active_profile_id.as_deref() == Some(profile.document.id.as_str()),
         })
         .collect();
 
@@ -288,7 +329,6 @@ pub(crate) fn inspect(
         active_source_path,
         legacy_source_path: legacy,
         legacy_adapter_source_path,
-        packs,
         profiles,
     })
 }
@@ -318,6 +358,7 @@ pub(crate) fn plan_initialize(
                 steps,
             });
         }
+        LibraryState::Upgrade => return plan_upgrade_library(library_root, state_root),
         LibraryState::Empty | LibraryState::Legacy => {}
     }
 
@@ -336,23 +377,28 @@ pub(crate) fn plan_initialize(
         "Create the versioned, sync-safe library schema.",
     ));
     steps.push(plan_step(
-        library_root.join(PACKS_DIR).join("base").join(PACK_MANIFEST_FILE),
-        "createPack",
-        "Create the base Rule Pack manifest with AGENTS.md as its required entrypoint.",
-    ));
-    steps.push(plan_step(
-        library_root.join(PACKS_DIR).join("base").join(ENTRYPOINT_FILE),
-        if imported { "copyLegacy" } else { "createRules" },
-        if imported {
-            "Copy the exact legacy AGENTS.md content into the base Rule Pack."
-        } else {
-            "Create the base Rule Pack AGENTS.md."
-        },
-    ));
-    steps.push(plan_step(
-        library_root.join(PROFILES_DIR).join("default.json"),
+        library_root
+            .join(PROFILES_DIR)
+            .join("default")
+            .join(PROFILE_MANIFEST_FILE),
         "createProfile",
-        "Create a default Profile that selects the base Rule Pack.",
+        "Create the default Profile manifest and its ordered rule-file list.",
+    ));
+    steps.push(plan_step(
+        library_root
+            .join(PROFILES_DIR)
+            .join("default")
+            .join(ENTRYPOINT_FILE),
+        if imported {
+            "copyLegacy"
+        } else {
+            "createRules"
+        },
+        if imported {
+            "Copy the exact legacy AGENTS.md content into the default Profile."
+        } else {
+            "Create the default Profile AGENTS.md."
+        },
     ));
     if !path_entry_exists(&library_root.join(".gitignore"))? {
         steps.push(plan_step(
@@ -391,10 +437,10 @@ pub(crate) fn plan_initialize(
         blocked: false,
         change_count: steps.len(),
         summary: if imported {
-            "Migrate the legacy AGENTS.md into the base Rule Pack with a rollback snapshot, remove the old root entry, then activate the default Profile."
+            "Migrate the legacy AGENTS.md into the default Profile with a rollback snapshot, remove the old root entry, then activate that Profile."
                 .into()
         } else {
-            "Create a Rule Pack library and activate its default Profile.".into()
+            "Create a Profile library and activate its default Profile.".into()
         },
         steps,
     })
@@ -404,6 +450,9 @@ pub(crate) fn initialize(
     library_root: &Path,
     state_root: &Path,
 ) -> Result<LibraryMutationOutcome, ArmError> {
+    if detect_library_state(library_root)?.0 == LibraryState::Upgrade {
+        return upgrade_library(library_root, state_root);
+    }
     let plan = plan_initialize(library_root, state_root)?;
     if plan.blocked {
         return Err(ArmError::Blocked(plan.summary));
@@ -429,43 +478,42 @@ pub(crate) fn initialize(
     };
 
     let schema = SchemaDocument {
-        schema_version: SCHEMA_VERSION,
+        schema_version: LIBRARY_SCHEMA_VERSION,
         format: "agent-rules-library".into(),
         sync: SyncPolicy {
-            include: vec!["schema.json".into(), "packs/**".into(), "profiles/**".into()],
-            exclude: vec![".runtime/**".into(), "current".into(), "machine state".into()],
+            include: vec!["schema.json".into(), "profiles/**".into()],
+            exclude: vec![
+                ".runtime/**".into(),
+                "current".into(),
+                "machine state".into(),
+            ],
             machine_selection: "local".into(),
         },
         legacy_source: imported.then(|| LEGACY_SOURCE_FILE.into()),
     };
-    let pack = PackDocument {
-        schema_version: SCHEMA_VERSION,
-        id: "base".into(),
-        name: "Base rules".into(),
-        description: "Rules shared by every local profile.".into(),
-        instructions: vec![ENTRYPOINT_FILE.into()],
-    };
     let profile = ProfileDocument {
-        schema_version: SCHEMA_VERSION,
+        schema_version: LIBRARY_SCHEMA_VERSION,
         id: "default".into(),
         name: "Default".into(),
         description: "The initial machine profile.".into(),
-        packs: vec!["base".into()],
+        instructions: vec![ENTRYPOINT_FILE.into()],
     };
 
     let mut changes = vec![
         missing_file_change(library_root.join(SCHEMA_FILE), pretty_json(&schema)? + "\n")?,
         missing_file_change(
-            library_root.join(PACKS_DIR).join("base").join(PACK_MANIFEST_FILE),
-            pretty_json(&pack)? + "\n",
-        )?,
-        missing_file_change(
-            library_root.join(PACKS_DIR).join("base").join(ENTRYPOINT_FILE),
-            rules,
-        )?,
-        missing_file_change(
-            library_root.join(PROFILES_DIR).join("default.json"),
+            library_root
+                .join(PROFILES_DIR)
+                .join("default")
+                .join(PROFILE_MANIFEST_FILE),
             pretty_json(&profile)? + "\n",
+        )?,
+        missing_file_change(
+            library_root
+                .join(PROFILES_DIR)
+                .join("default")
+                .join(ENTRYPOINT_FILE),
+            rules,
         )?,
     ];
     if !path_entry_exists(&library_root.join(".gitignore"))? {
@@ -499,26 +547,368 @@ pub(crate) fn initialize(
     }
 }
 
-pub(crate) fn plan_create_pack(
+fn migration_active_profile_id(
+    library_root: &Path,
+    state_root: &Path,
+) -> Result<Option<String>, ArmError> {
+    if let Some(machine) = read_machine(state_root)? {
+        return Ok(Some(machine.active_profile_id));
+    }
+    let current_path = library_root.join(CURRENT_LINK);
+    match read_file_state(&current_path)? {
+        FileState::Missing => Ok(None),
+        FileState::File { .. } => Err(ArmError::Blocked(
+            "migration cannot infer the active Profile from an unmanaged `current` entry".into(),
+        )),
+        FileState::Symlink { target } => {
+            if !managed_runtime_link(library_root, &current_path, &target) {
+                return Err(ArmError::Blocked(
+                    "migration cannot infer the active Profile from a foreign `current` link"
+                        .into(),
+                ));
+            }
+            let runtime_path = resolve_link(&current_path, &target);
+            let reference: RuntimeProfileReference =
+                read_json(&runtime_path.join("manifest.json"))?;
+            validate_id(&reference.profile_id)?;
+            Ok(Some(reference.profile_id))
+        }
+    }
+}
+
+fn plan_upgrade_library(library_root: &Path, state_root: &Path) -> Result<LibraryPlan, ArmError> {
+    let migration = match prepare_v1_migration(library_root) {
+        Ok(migration) => migration,
+        Err(ArmError::InvalidLibrary(summary) | ArmError::Blocked(summary)) => {
+            return Ok(LibraryPlan {
+                operation: "upgradeLibrary".into(),
+                blocked: true,
+                change_count: 0,
+                summary,
+                steps: Vec::new(),
+            })
+        }
+        Err(error) => return Err(error),
+    };
+    let active_profile_id = match migration_active_profile_id(library_root, state_root) {
+        Ok(active_profile_id) => active_profile_id,
+        Err(ArmError::Blocked(summary) | ArmError::InvalidLibrary(summary)) => {
+            return Ok(LibraryPlan {
+                operation: "upgradeLibrary".into(),
+                blocked: true,
+                change_count: 0,
+                summary,
+                steps: Vec::new(),
+            })
+        }
+        Err(ArmError::UnknownProfile(profile_id)) => {
+            return Ok(LibraryPlan {
+                operation: "upgradeLibrary".into(),
+                blocked: true,
+                change_count: 0,
+                summary: format!("migration references unknown Profile `{profile_id}`"),
+                steps: Vec::new(),
+            })
+        }
+        Err(error) => return Err(error),
+    };
+    let mut steps = migration.steps;
+    if let Some(active_profile_id) = active_profile_id {
+        let Some(profile) = migration.loaded.profiles.get(&active_profile_id) else {
+            return Ok(LibraryPlan {
+                operation: "upgradeLibrary".into(),
+                blocked: true,
+                change_count: 0,
+                summary: format!("migration references unknown Profile `{active_profile_id}`"),
+                steps: Vec::new(),
+            });
+        };
+        let rendered = render_profile(profile)?;
+        let runtime_path = library_root.join(RUNTIME_DIR).join(&rendered.runtime_name);
+        let current_path = library_root.join(CURRENT_LINK);
+        let current = read_file_state(&current_path)?;
+        let current_allowed = match &current {
+            FileState::Missing => true,
+            FileState::Symlink { target } => {
+                managed_runtime_link(library_root, &current_path, target)
+            }
+            FileState::File { .. } => false,
+        };
+        if !current_allowed {
+            return Ok(LibraryPlan {
+                operation: "upgradeLibrary".into(),
+                blocked: true,
+                change_count: 0,
+                summary: "Migration is blocked by an unmanaged `current` entry.".into(),
+                steps: Vec::new(),
+            });
+        }
+        let runtime_current = runtime_matches(&runtime_path, &rendered)?;
+        if path_entry_exists(&runtime_path)? && !runtime_current {
+            return Ok(LibraryPlan {
+                operation: "upgradeLibrary".into(),
+                blocked: true,
+                change_count: 0,
+                summary: format!(
+                    "Migration is blocked by an unexpected immutable runtime: {}",
+                    runtime_path.display()
+                ),
+                steps: Vec::new(),
+            });
+        }
+        if !runtime_current {
+            steps.push(plan_step(
+                runtime_path,
+                "renderRuntime",
+                "Render the active Profile from its new Profile-owned sources.",
+            ));
+        }
+        let desired_current = FileState::Symlink {
+            target: format!("{RUNTIME_DIR}/{}", rendered.runtime_name),
+        };
+        if current != desired_current {
+            steps.push(plan_step(
+                current_path,
+                "switchCurrent",
+                "Switch the stable current link to the migrated Profile runtime.",
+            ));
+        }
+        let machine_path = state_root.join(MACHINE_FILE);
+        let machine = read_file_state(&machine_path)?;
+        let desired_machine = FileState::File {
+            content: pretty_json(&MachineDocument {
+                schema_version: MACHINE_SCHEMA_VERSION,
+                active_profile_id,
+            })? + "\n",
+        };
+        if machine != desired_machine {
+            steps.push(plan_step(
+                machine_path,
+                "selectLocalProfile",
+                "Preserve the inferred active Profile in machine-local state.",
+            ));
+        }
+    }
+    Ok(LibraryPlan {
+        operation: "upgradeLibrary".into(),
+        blocked: false,
+        change_count: steps.len(),
+        summary: "Migrate Rule Pack sources into Profile-owned files with a rollback snapshot."
+            .into(),
+        steps,
+    })
+}
+
+fn upgrade_library(
+    library_root: &Path,
+    state_root: &Path,
+) -> Result<LibraryMutationOutcome, ArmError> {
+    let plan = plan_upgrade_library(library_root, state_root)?;
+    if plan.blocked {
+        return Err(ArmError::Blocked(plan.summary));
+    }
+    let active_profile_id = migration_active_profile_id(library_root, state_root)?;
+    let migration = prepare_v1_migration(library_root)?;
+    let migrated = apply_changes(state_root, "upgradeLibrary", migration.changes)?;
+    let Some(active_profile_id) = active_profile_id else {
+        return Ok(migrated);
+    };
+    match activate_profile(library_root, state_root, &active_profile_id) {
+        Ok(mut activated) => {
+            let mut changed = migrated.changed;
+            changed.append(&mut activated.changed);
+            Ok(LibraryMutationOutcome {
+                changed,
+                backup_id: activated.backup_id.or(migrated.backup_id),
+            })
+        }
+        Err(error) => {
+            let _ = rollback_library_latest(state_root);
+            Err(error)
+        }
+    }
+}
+
+fn prepare_v1_migration(library_root: &Path) -> Result<PreparedMigration, ArmError> {
+    let legacy = load_legacy_library(library_root)?;
+    let referenced = legacy
+        .profiles
+        .values()
+        .flat_map(|profile| profile.packs.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    if let Some(unused) = legacy.packs.keys().find(|id| !referenced.contains(*id)) {
+        return Err(ArmError::InvalidLibrary(format!(
+            "Rule Pack `{unused}` is not used by any Profile; migration stopped to avoid orphaning its rules."
+        )));
+    }
+
+    let schema_path = library_root.join(SCHEMA_FILE);
+    let schema_original = read_file_state(&schema_path)?;
+    let schema = SchemaDocument {
+        schema_version: LIBRARY_SCHEMA_VERSION,
+        format: "agent-rules-library".into(),
+        sync: SyncPolicy {
+            include: vec!["schema.json".into(), "profiles/**".into()],
+            exclude: vec![
+                ".runtime/**".into(),
+                "current".into(),
+                "machine state".into(),
+            ],
+            machine_selection: "local".into(),
+        },
+        legacy_source: legacy.schema.legacy_source.clone(),
+    };
+    let mut changes = vec![PreparedChange {
+        path: schema_path.clone(),
+        original: schema_original,
+        desired: FileState::File {
+            content: pretty_json(&schema)? + "\n",
+        },
+    }];
+    let mut steps = vec![plan_step(
+        schema_path,
+        "upgradeSchema",
+        "Replace the Rule Pack schema with the Profile-owned schema.",
+    )];
+    let mut profiles = BTreeMap::new();
+
+    for legacy_profile in legacy.profiles.values() {
+        let profile_directory = library_root.join(PROFILES_DIR).join(&legacy_profile.id);
+        if path_entry_exists(&profile_directory)? {
+            return Err(ArmError::Blocked(format!(
+                "Profile directory already exists and will not be overwritten: {}",
+                profile_directory.display()
+            )));
+        }
+        let mut instructions = Vec::new();
+        let mut files = Vec::new();
+        for pack_id in &legacy_profile.packs {
+            let pack = legacy.packs.get(pack_id).ok_or_else(|| {
+                ArmError::InvalidLibrary(format!(
+                    "legacy Profile references unknown Rule Pack `{pack_id}`"
+                ))
+            })?;
+            for source in &pack.files {
+                let relative_path = if instructions.is_empty() {
+                    ENTRYPOINT_FILE.into()
+                } else {
+                    format!("rules/{pack_id}/{}", source.relative_path)
+                };
+                validate_instruction_path(&relative_path)?;
+                let target = profile_directory.join(&relative_path);
+                changes.push(missing_file_change(target.clone(), source.content.clone())?);
+                steps.push(plan_step(
+                    target.clone(),
+                    "copyProfileRules",
+                    "Copy an exact legacy rule source into its owning Profile.",
+                ));
+                instructions.push(relative_path.clone());
+                files.push(LoadedRuleFile {
+                    relative_path,
+                    path: target,
+                    content: source.content.clone(),
+                    digest: source.digest.clone(),
+                    modified_at: source.modified_at.clone(),
+                });
+            }
+        }
+        let document = ProfileDocument {
+            schema_version: LIBRARY_SCHEMA_VERSION,
+            id: legacy_profile.id.clone(),
+            name: legacy_profile.name.clone(),
+            description: legacy_profile.description.clone(),
+            instructions,
+        };
+        validate_profile_document(&document, &legacy_profile.id)?;
+        let manifest_path = profile_directory.join(PROFILE_MANIFEST_FILE);
+        changes.push(missing_file_change(
+            manifest_path.clone(),
+            pretty_json(&document)? + "\n",
+        )?);
+        steps.push(plan_step(
+            manifest_path,
+            "createProfile",
+            "Create the Profile-owned instruction manifest.",
+        ));
+
+        let legacy_profile_path = library_root
+            .join(PROFILES_DIR)
+            .join(format!("{}.json", legacy_profile.id));
+        let legacy_profile_original = read_file_state(&legacy_profile_path)?;
+        changes.push(PreparedChange {
+            path: legacy_profile_path.clone(),
+            original: legacy_profile_original,
+            desired: FileState::Missing,
+        });
+        steps.push(plan_step(
+            legacy_profile_path,
+            "removeLegacyProfile",
+            "Remove the old Pack-selection document after its Profile copy is prepared.",
+        ));
+        profiles.insert(document.id.clone(), LoadedProfile { document, files });
+    }
+
+    for pack in legacy.packs.values() {
+        for source in &pack.files {
+            let original = read_file_state(&source.path)?;
+            changes.push(PreparedChange {
+                path: source.path.clone(),
+                original,
+                desired: FileState::Missing,
+            });
+            steps.push(plan_step(
+                source.path.clone(),
+                "removeLegacyPackSource",
+                "Remove the old Pack source after every referencing Profile has an exact copy.",
+            ));
+        }
+        let manifest_path = library_root
+            .join(PACKS_DIR)
+            .join(&pack.document.id)
+            .join(PACK_MANIFEST_FILE);
+        let original = read_file_state(&manifest_path)?;
+        changes.push(PreparedChange {
+            path: manifest_path.clone(),
+            original,
+            desired: FileState::Missing,
+        });
+        steps.push(plan_step(
+            manifest_path,
+            "removeLegacyPack",
+            "Remove the old Rule Pack manifest after all rules are copied.",
+        ));
+    }
+
+    Ok(PreparedMigration {
+        changes,
+        steps,
+        loaded: LoadedLibrary {
+            profiles,
+            legacy_source_hint: legacy.schema.legacy_source,
+        },
+    })
+}
+
+pub(crate) fn plan_create_profile(
     library_root: &Path,
     id: &str,
     name: &str,
     description: &str,
 ) -> Result<LibraryPlan, ArmError> {
     validate_id(id)?;
-    validate_label("pack name", name, 80)?;
-    validate_label("pack description", description, 240)?;
+    validate_label("profile name", name, 80)?;
+    validate_label("profile description", description, 240)?;
     ensure_ready(library_root)?;
-    let directory = library_root.join(PACKS_DIR).join(id);
+    let directory = library_root.join(PROFILES_DIR).join(id);
     let blocked = path_entry_exists(&directory)?;
     let steps = if blocked {
         Vec::new()
     } else {
         vec![
             plan_step(
-                directory.join(PACK_MANIFEST_FILE),
-                "createPack",
-                "Create a versioned Rule Pack manifest.",
+                directory.join(PROFILE_MANIFEST_FILE),
+                "createProfile",
+                "Create a versioned Profile manifest.",
             ),
             plan_step(
                 directory.join(ENTRYPOINT_FILE),
@@ -528,187 +918,13 @@ pub(crate) fn plan_create_pack(
         ]
     };
     Ok(LibraryPlan {
-        operation: "createPack".into(),
-        blocked,
-        change_count: steps.len(),
-        summary: if blocked {
-            format!("Rule Pack `{id}` already exists; no file will be overwritten.")
-        } else {
-            format!("Create Rule Pack `{name}` with a required AGENTS.md entrypoint.")
-        },
-        steps,
-    })
-}
-
-pub(crate) fn create_pack(
-    library_root: &Path,
-    state_root: &Path,
-    id: &str,
-    name: &str,
-    description: &str,
-) -> Result<LibraryMutationOutcome, ArmError> {
-    let plan = plan_create_pack(library_root, id, name, description)?;
-    if plan.blocked {
-        return Err(ArmError::Blocked(plan.summary));
-    }
-    let document = PackDocument {
-        schema_version: SCHEMA_VERSION,
-        id: id.into(),
-        name: name.trim().into(),
-        description: description.trim().into(),
-        instructions: vec![ENTRYPOINT_FILE.into()],
-    };
-    let directory = library_root.join(PACKS_DIR).join(id);
-    apply_changes(
-        state_root,
-        "createPack",
-        vec![
-            missing_file_change(
-                directory.join(PACK_MANIFEST_FILE),
-                pretty_json(&document)? + "\n",
-            )?,
-            missing_file_change(directory.join(ENTRYPOINT_FILE), STARTER_RULES.into())?,
-        ],
-    )
-}
-
-pub(crate) fn plan_add_pack_file(
-    library_root: &Path,
-    pack_id: &str,
-    relative_path: &str,
-) -> Result<LibraryPlan, ArmError> {
-    validate_id(pack_id)?;
-    validate_instruction_path(relative_path)?;
-    let loaded = load_library(library_root)?;
-    let pack = loaded
-        .packs
-        .get(pack_id)
-        .ok_or_else(|| ArmError::UnknownPack(pack_id.into()))?;
-    let file_path = library_root.join(PACKS_DIR).join(pack_id).join(relative_path);
-    let already_declared = pack
-        .document
-        .instructions
-        .iter()
-        .any(|path| path == relative_path);
-    let blocked = already_declared || path_entry_exists(&file_path)?;
-    let steps = if blocked {
-        Vec::new()
-    } else {
-        vec![
-            plan_step(
-                library_root
-                    .join(PACKS_DIR)
-                    .join(pack_id)
-                    .join(PACK_MANIFEST_FILE),
-                "updatePack",
-                "Append the new Markdown path to the ordered instruction manifest.",
-            ),
-            plan_step(
-                file_path,
-                "createRuleFile",
-                "Create a new user-owned Markdown instruction source.",
-            ),
-        ]
-    };
-    Ok(LibraryPlan {
-        operation: "addPackFile".into(),
-        blocked,
-        change_count: steps.len(),
-        summary: if blocked {
-            format!(
-                "`{relative_path}` is already declared or exists in Rule Pack `{pack_id}`; it will not be overwritten."
-            )
-        } else {
-            format!(
-                "Add `{relative_path}` after the existing sources in Rule Pack `{pack_id}`."
-            )
-        },
-        steps,
-    })
-}
-
-pub(crate) fn add_pack_file(
-    library_root: &Path,
-    state_root: &Path,
-    pack_id: &str,
-    relative_path: &str,
-) -> Result<LibraryMutationOutcome, ArmError> {
-    let plan = plan_add_pack_file(library_root, pack_id, relative_path)?;
-    if plan.blocked {
-        return Err(ArmError::Blocked(plan.summary));
-    }
-    let manifest_path = library_root
-        .join(PACKS_DIR)
-        .join(pack_id)
-        .join(PACK_MANIFEST_FILE);
-    let manifest_original = read_file_state(&manifest_path)?;
-    let mut document: PackDocument = match &manifest_original {
-        FileState::File { content } => serde_json::from_str(content)?,
-        _ => return Err(ArmError::ApplyDrift(manifest_path.display().to_string())),
-    };
-    validate_pack_document(&document, pack_id)?;
-    if document
-        .instructions
-        .iter()
-        .any(|path| path == relative_path)
-    {
-        return Err(ArmError::ApplyDrift(manifest_path.display().to_string()));
-    }
-    document.instructions.push(relative_path.into());
-    let file_path = library_root.join(PACKS_DIR).join(pack_id).join(relative_path);
-    let title = Path::new(relative_path)
-        .file_stem()
-        .and_then(|value| value.to_str())
-        .unwrap_or("Supplemental rules")
-        .replace('-', " ")
-        .replace('_', " ");
-    apply_changes(
-        state_root,
-        "addPackFile",
-        vec![
-            PreparedChange {
-                path: manifest_path,
-                original: manifest_original,
-                desired: FileState::File {
-                    content: pretty_json(&document)? + "\n",
-                },
-            },
-            missing_file_change(file_path, format!("# {title}\n"))?,
-        ],
-    )
-}
-
-pub(crate) fn plan_create_profile(
-    library_root: &Path,
-    id: &str,
-    name: &str,
-    description: &str,
-    pack_ids: &[String],
-) -> Result<LibraryPlan, ArmError> {
-    validate_id(id)?;
-    validate_label("profile name", name, 80)?;
-    validate_label("profile description", description, 240)?;
-    let loaded = load_library(library_root)?;
-    validate_pack_selection(&loaded, pack_ids)?;
-    let path = library_root.join(PROFILES_DIR).join(format!("{id}.json"));
-    let blocked = path_entry_exists(&path)?;
-    let steps = if blocked {
-        Vec::new()
-    } else {
-        vec![plan_step(
-            path,
-            "createProfile",
-            "Create an ordered, syncable list of Rule Pack ids.",
-        )]
-    };
-    Ok(LibraryPlan {
         operation: "createProfile".into(),
         blocked,
         change_count: steps.len(),
         summary: if blocked {
             format!("Profile `{id}` already exists; no file will be overwritten.")
         } else {
-            format!("Create Profile `{name}` from {} ordered Rule Pack(s).", pack_ids.len())
+            format!("Create Profile `{name}` with a required AGENTS.md entrypoint.")
         },
         steps,
     })
@@ -720,26 +936,139 @@ pub(crate) fn create_profile(
     id: &str,
     name: &str,
     description: &str,
-    pack_ids: &[String],
 ) -> Result<LibraryMutationOutcome, ArmError> {
-    let plan = plan_create_profile(library_root, id, name, description, pack_ids)?;
+    let plan = plan_create_profile(library_root, id, name, description)?;
     if plan.blocked {
         return Err(ArmError::Blocked(plan.summary));
     }
     let document = ProfileDocument {
-        schema_version: SCHEMA_VERSION,
+        schema_version: LIBRARY_SCHEMA_VERSION,
         id: id.into(),
         name: name.trim().into(),
         description: description.trim().into(),
-        packs: pack_ids.to_vec(),
+        instructions: vec![ENTRYPOINT_FILE.into()],
     };
+    let directory = library_root.join(PROFILES_DIR).join(id);
     apply_changes(
         state_root,
         "createProfile",
-        vec![missing_file_change(
-            library_root.join(PROFILES_DIR).join(format!("{id}.json")),
-            pretty_json(&document)? + "\n",
-        )?],
+        vec![
+            missing_file_change(
+                directory.join(PROFILE_MANIFEST_FILE),
+                pretty_json(&document)? + "\n",
+            )?,
+            missing_file_change(directory.join(ENTRYPOINT_FILE), STARTER_RULES.into())?,
+        ],
+    )
+}
+
+pub(crate) fn plan_add_profile_file(
+    library_root: &Path,
+    profile_id: &str,
+    relative_path: &str,
+) -> Result<LibraryPlan, ArmError> {
+    validate_id(profile_id)?;
+    validate_instruction_path(relative_path)?;
+    let loaded = load_library(library_root)?;
+    let profile = loaded
+        .profiles
+        .get(profile_id)
+        .ok_or_else(|| ArmError::UnknownProfile(profile_id.into()))?;
+    let file_path = library_root
+        .join(PROFILES_DIR)
+        .join(profile_id)
+        .join(relative_path);
+    let already_declared = profile
+        .document
+        .instructions
+        .iter()
+        .any(|path| path == relative_path);
+    let blocked = already_declared || path_entry_exists(&file_path)?;
+    let steps = if blocked {
+        Vec::new()
+    } else {
+        vec![
+            plan_step(
+                library_root
+                    .join(PROFILES_DIR)
+                    .join(profile_id)
+                    .join(PROFILE_MANIFEST_FILE),
+                "updateProfile",
+                "Append the new Markdown path to the ordered instruction manifest.",
+            ),
+            plan_step(
+                file_path,
+                "createRuleFile",
+                "Create a new user-owned Markdown instruction source.",
+            ),
+        ]
+    };
+    Ok(LibraryPlan {
+        operation: "addProfileFile".into(),
+        blocked,
+        change_count: steps.len(),
+        summary: if blocked {
+            format!(
+                "`{relative_path}` is already declared or exists in Profile `{profile_id}`; it will not be overwritten."
+            )
+        } else {
+            format!("Add `{relative_path}` after the existing sources in Profile `{profile_id}`.")
+        },
+        steps,
+    })
+}
+
+pub(crate) fn add_profile_file(
+    library_root: &Path,
+    state_root: &Path,
+    profile_id: &str,
+    relative_path: &str,
+) -> Result<LibraryMutationOutcome, ArmError> {
+    let plan = plan_add_profile_file(library_root, profile_id, relative_path)?;
+    if plan.blocked {
+        return Err(ArmError::Blocked(plan.summary));
+    }
+    let manifest_path = library_root
+        .join(PROFILES_DIR)
+        .join(profile_id)
+        .join(PROFILE_MANIFEST_FILE);
+    let manifest_original = read_file_state(&manifest_path)?;
+    let mut document: ProfileDocument = match &manifest_original {
+        FileState::File { content } => serde_json::from_str(content)?,
+        _ => return Err(ArmError::ApplyDrift(manifest_path.display().to_string())),
+    };
+    validate_profile_document(&document, profile_id)?;
+    if document
+        .instructions
+        .iter()
+        .any(|path| path == relative_path)
+    {
+        return Err(ArmError::ApplyDrift(manifest_path.display().to_string()));
+    }
+    document.instructions.push(relative_path.into());
+    let file_path = library_root
+        .join(PROFILES_DIR)
+        .join(profile_id)
+        .join(relative_path);
+    let title = Path::new(relative_path)
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("Supplemental rules")
+        .replace('-', " ")
+        .replace('_', " ");
+    apply_changes(
+        state_root,
+        "addProfileFile",
+        vec![
+            PreparedChange {
+                path: manifest_path,
+                original: manifest_original,
+                desired: FileState::File {
+                    content: pretty_json(&document)? + "\n",
+                },
+            },
+            missing_file_change(file_path, format!("# {title}\n"))?,
+        ],
     )
 }
 
@@ -754,7 +1083,7 @@ pub(crate) fn plan_activate_profile(
         .profiles
         .get(profile_id)
         .ok_or_else(|| ArmError::UnknownProfile(profile_id.into()))?;
-    let rendered = render_profile(&loaded, profile)?;
+    let rendered = render_profile(profile)?;
     let runtime_path = library_root.join(RUNTIME_DIR).join(&rendered.runtime_name);
     let current_path = library_root.join(CURRENT_LINK);
     let machine_path = state_root.join(MACHINE_FILE);
@@ -765,7 +1094,7 @@ pub(crate) fn plan_activate_profile(
     };
     let desired_machine = FileState::File {
         content: pretty_json(&MachineDocument {
-            schema_version: SCHEMA_VERSION,
+            schema_version: MACHINE_SCHEMA_VERSION,
             active_profile_id: profile_id.into(),
         })? + "\n",
     };
@@ -775,19 +1104,28 @@ pub(crate) fn plan_activate_profile(
         FileState::File { .. } => false,
     };
     let machine_allowed = matches!(machine, FileState::Missing | FileState::File { .. });
-    let blocked = !current_allowed || !machine_allowed;
+    let runtime_current = runtime_matches(&runtime_path, &rendered)?;
+    let runtime_conflict = path_entry_exists(&runtime_path)? && !runtime_current;
+    let blocked = !current_allowed || !machine_allowed || runtime_conflict;
     let mut steps = Vec::new();
     if blocked {
         return Ok(LibraryPlan {
             operation: "activateProfile".into(),
             blocked: true,
             change_count: 0,
-            summary: "Activation is blocked by an unmanaged `current` link or machine state entry."
-                .into(),
+            summary: if runtime_conflict {
+                format!(
+                    "Activation is blocked by an unexpected immutable runtime: {}",
+                    runtime_path.display()
+                )
+            } else {
+                "Activation is blocked by an unmanaged `current` link or machine state entry."
+                    .into()
+            },
             steps,
         });
     }
-    if !runtime_matches(&runtime_path, &rendered)? {
+    if !runtime_current {
         steps.push(plan_step(
             runtime_path,
             "renderRuntime",
@@ -835,8 +1173,8 @@ pub(crate) fn activate_profile(
         .profiles
         .get(profile_id)
         .ok_or_else(|| ArmError::UnknownProfile(profile_id.into()))?;
-    let rendered = render_profile(&loaded, profile)?;
-    let runtime_path = ensure_runtime(library_root, &rendered)?;
+    let rendered = render_profile(profile)?;
+    let runtime_path = library_root.join(RUNTIME_DIR).join(&rendered.runtime_name);
     let current_path = library_root.join(CURRENT_LINK);
     let machine_path = state_root.join(MACHINE_FILE);
     let desired_current = FileState::Symlink {
@@ -844,11 +1182,12 @@ pub(crate) fn activate_profile(
     };
     let desired_machine = FileState::File {
         content: pretty_json(&MachineDocument {
-            schema_version: SCHEMA_VERSION,
+            schema_version: MACHINE_SCHEMA_VERSION,
             active_profile_id: profile_id.into(),
         })? + "\n",
     };
-    let mut changes = Vec::new();
+    let mut changes = prepare_runtime_changes(&runtime_path, &rendered)?;
+    let rendered_runtime = !changes.is_empty();
     for (path, desired) in [
         (current_path, desired_current),
         (machine_path, desired_machine),
@@ -863,33 +1202,35 @@ pub(crate) fn activate_profile(
         }
     }
     let mut outcome = apply_changes(state_root, "activateProfile", changes)?;
-    if plan
-        .steps
-        .iter()
-        .any(|step| step.action == "renderRuntime")
-    {
-        outcome.changed.insert(0, runtime_path.display().to_string());
+    if rendered_runtime {
+        outcome
+            .changed
+            .retain(|path| !Path::new(path).starts_with(&runtime_path));
+        outcome
+            .changed
+            .insert(0, runtime_path.display().to_string());
     }
     Ok(outcome)
 }
 
 pub(crate) fn rule_source_path(
     library_root: &Path,
-    pack_id: &str,
+    profile_id: &str,
     relative_path: &str,
 ) -> Result<PathBuf, ArmError> {
     let loaded = load_library(library_root)?;
-    let pack = loaded
-        .packs
-        .get(pack_id)
-        .ok_or_else(|| ArmError::UnknownPack(pack_id.into()))?;
-    pack.files
+    let profile = loaded
+        .profiles
+        .get(profile_id)
+        .ok_or_else(|| ArmError::UnknownProfile(profile_id.into()))?;
+    profile
+        .files
         .iter()
         .find(|file| file.relative_path == relative_path)
         .map(|file| file.path.clone())
         .ok_or_else(|| {
             ArmError::InvalidLibrary(format!(
-                "`{relative_path}` is not declared by Rule Pack `{pack_id}`"
+                "`{relative_path}` is not declared by Profile `{profile_id}`"
             ))
         })
 }
@@ -921,6 +1262,7 @@ pub(crate) fn rollback_library_latest(state_root: &Path) -> Result<RollbackOutco
         restore_file_state(&path, &entry.original)?;
         restored.push(entry.target_path.clone());
     }
+    cleanup_created_directories(&backup.created_directories)?;
     archive_backup(state_root, &backup_path)?;
     Ok(RollbackOutcome {
         restored,
@@ -932,7 +1274,10 @@ fn detect_library_state(library_root: &Path) -> Result<(LibraryState, String), A
     let metadata = match fs::symlink_metadata(library_root) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            return Ok((LibraryState::Empty, "The rule library has not been created.".into()))
+            return Ok((
+                LibraryState::Empty,
+                "The rule library has not been created.".into(),
+            ))
         }
         Err(error) => return Err(ArmError::io(library_root.display().to_string(), error)),
     };
@@ -944,7 +1289,26 @@ fn detect_library_state(library_root: &Path) -> Result<(LibraryState, String), A
     }
     let schema = library_root.join(SCHEMA_FILE);
     if regular_file(schema.clone())?.is_some() {
-        return Ok((LibraryState::Ready, "The versioned rule library is ready.".into()));
+        let document: SchemaDocument = read_json(&schema)?;
+        if document.format != "agent-rules-library" {
+            return Ok((
+                LibraryState::Conflict,
+                "schema.json uses an unsupported rule-library format.".into(),
+            ));
+        }
+        return match document.schema_version {
+            LIBRARY_SCHEMA_VERSION => {
+                Ok((LibraryState::Ready, "The Profile library is ready.".into()))
+            }
+            LEGACY_LIBRARY_SCHEMA_VERSION => Ok((
+                LibraryState::Upgrade,
+                "This Rule Pack library can be migrated into Profile-owned rules.".into(),
+            )),
+            version => Ok((
+                LibraryState::Conflict,
+                format!("schema.json uses unsupported version {version}."),
+            )),
+        };
     }
     if path_entry_exists(&schema)? {
         return Ok((
@@ -957,7 +1321,8 @@ fn detect_library_state(library_root: &Path) -> Result<(LibraryState, String), A
     for entry in fs::read_dir(library_root)
         .map_err(|error| ArmError::io(library_root.display().to_string(), error))?
     {
-        let entry = entry.map_err(|error| ArmError::io(library_root.display().to_string(), error))?;
+        let entry =
+            entry.map_err(|error| ArmError::io(library_root.display().to_string(), error))?;
         let name = entry.file_name().to_string_lossy().to_string();
         if !matches!(name.as_str(), LEGACY_SOURCE_FILE | ".git" | ".gitignore") {
             unexpected.push(name);
@@ -975,7 +1340,7 @@ fn detect_library_state(library_root: &Path) -> Result<(LibraryState, String), A
     if regular_file(library_root.join(LEGACY_SOURCE_FILE))?.is_some() {
         return Ok((
             LibraryState::Legacy,
-            "A legacy root AGENTS.md can be migrated into a Rule Pack with rollback protection."
+            "A legacy root AGENTS.md can be migrated into a Profile with rollback protection."
                 .into(),
         ));
     }
@@ -1001,7 +1366,99 @@ fn load_library(library_root: &Path) -> Result<LoadedLibrary, ArmError> {
     ensure_ready(library_root)?;
     let schema_path = library_root.join(SCHEMA_FILE);
     let schema: SchemaDocument = read_json(&schema_path)?;
-    if schema.schema_version != SCHEMA_VERSION || schema.format != "agent-rules-library" {
+    if schema.schema_version != LIBRARY_SCHEMA_VERSION || schema.format != "agent-rules-library" {
+        return Err(ArmError::InvalidLibrary(format!(
+            "unsupported schema in {}",
+            schema_path.display()
+        )));
+    }
+    if schema
+        .legacy_source
+        .as_deref()
+        .is_some_and(|source| source != LEGACY_SOURCE_FILE)
+    {
+        return Err(ArmError::InvalidLibrary(format!(
+            "unsupported legacy source in {}",
+            schema_path.display()
+        )));
+    }
+
+    let profiles_root = library_root.join(PROFILES_DIR);
+    let mut profiles = BTreeMap::new();
+    for path in sorted_entries(&profiles_root)? {
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| ArmError::io(path.display().to_string(), error))?;
+        if !metadata.is_dir() {
+            return Err(ArmError::InvalidLibrary(format!(
+                "Profile entry is not a directory: {}",
+                path.display()
+            )));
+        }
+        let directory_id = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .ok_or_else(|| ArmError::InvalidLibrary(path.display().to_string()))?
+            .to_string();
+        validate_id(&directory_id)?;
+        let manifest_path = path.join(PROFILE_MANIFEST_FILE);
+        let manifest_metadata = fs::symlink_metadata(&manifest_path)
+            .map_err(|error| ArmError::io(manifest_path.display().to_string(), error))?;
+        if !manifest_metadata.is_file() {
+            return Err(ArmError::InvalidLibrary(format!(
+                "Profile manifest must be a regular file: {}",
+                manifest_path.display()
+            )));
+        }
+        let document: ProfileDocument = read_json(&manifest_path)?;
+        validate_profile_document(&document, &directory_id)?;
+        let mut files = Vec::new();
+        for relative in &document.instructions {
+            validate_instruction_path(relative)?;
+            let file_path = path.join(relative);
+            let metadata = fs::symlink_metadata(&file_path)
+                .map_err(|error| ArmError::io(file_path.display().to_string(), error))?;
+            if !metadata.is_file() {
+                return Err(ArmError::InvalidLibrary(format!(
+                    "instruction source must be a regular file: {}",
+                    file_path.display()
+                )));
+            }
+            let content = fs::read_to_string(&file_path)
+                .map_err(|error| ArmError::io(file_path.display().to_string(), error))?;
+            files.push(LoadedRuleFile {
+                relative_path: relative.clone(),
+                path: file_path,
+                digest: short_digest(&content),
+                content,
+                modified_at: metadata
+                    .modified()
+                    .ok()
+                    .map(DateTime::<Utc>::from)
+                    .map(|timestamp| timestamp.to_rfc3339()),
+            });
+        }
+        if profiles
+            .insert(document.id.clone(), LoadedProfile { document, files })
+            .is_some()
+        {
+            return Err(ArmError::InvalidLibrary(format!(
+                "duplicate Profile id `{directory_id}`"
+            )));
+        }
+    }
+
+    Ok(LoadedLibrary {
+        profiles,
+        legacy_source_hint: schema.legacy_source,
+    })
+}
+
+fn load_legacy_library(library_root: &Path) -> Result<LoadedLegacyLibrary, ArmError> {
+    let schema_path = library_root.join(SCHEMA_FILE);
+    let schema: SchemaDocument = read_json(&schema_path)?;
+    if schema.schema_version != LEGACY_LIBRARY_SCHEMA_VERSION
+        || schema.format != "agent-rules-library"
+    {
         return Err(ArmError::InvalidLibrary(format!(
             "unsupported schema in {}",
             schema_path.display()
@@ -1044,8 +1501,8 @@ fn load_library(library_root: &Path) -> Result<LoadedLibrary, ArmError> {
                 manifest_path.display()
             )));
         }
-        let document: PackDocument = read_json(&manifest_path)?;
-        validate_pack_document(&document, &directory_id)?;
+        let document: LegacyPackDocument = read_json(&manifest_path)?;
+        validate_legacy_pack_document(&document, &directory_id)?;
         let mut files = Vec::new();
         for relative in &document.instructions {
             validate_instruction_path(relative)?;
@@ -1072,14 +1529,12 @@ fn load_library(library_root: &Path) -> Result<LoadedLibrary, ArmError> {
                     .map(|timestamp| timestamp.to_rfc3339()),
             });
         }
+        let declared = std::iter::once(PACK_MANIFEST_FILE.to_string())
+            .chain(document.instructions.iter().cloned())
+            .collect::<BTreeSet<_>>();
+        validate_legacy_owned_files(&path, &path, &declared)?;
         if packs
-            .insert(
-                document.id.clone(),
-                LoadedPack {
-                    document,
-                    files,
-                },
-            )
+            .insert(document.id.clone(), LoadedLegacyPack { document, files })
             .is_some()
         {
             return Err(ArmError::InvalidLibrary(format!(
@@ -1093,7 +1548,8 @@ fn load_library(library_root: &Path) -> Result<LoadedLibrary, ArmError> {
     for path in sorted_entries(&profiles_root)? {
         let metadata = fs::symlink_metadata(&path)
             .map_err(|error| ArmError::io(path.display().to_string(), error))?;
-        if !metadata.is_file() || path.extension().and_then(|value| value.to_str()) != Some("json") {
+        if !metadata.is_file() || path.extension().and_then(|value| value.to_str()) != Some("json")
+        {
             return Err(ArmError::InvalidLibrary(format!(
                 "Profile entry must be a JSON file: {}",
                 path.display()
@@ -1103,23 +1559,87 @@ fn load_library(library_root: &Path) -> Result<LoadedLibrary, ArmError> {
             .file_stem()
             .and_then(|value| value.to_str())
             .ok_or_else(|| ArmError::InvalidLibrary(path.display().to_string()))?;
-        let document: ProfileDocument = read_json(&path)?;
-        validate_profile_document(&document, file_id, &packs)?;
+        let document: LegacyProfileDocument = read_json(&path)?;
+        validate_legacy_profile_document(&document, file_id, &packs)?;
         if profiles.insert(document.id.clone(), document).is_some() {
             return Err(ArmError::InvalidLibrary(format!(
                 "duplicate Profile id `{file_id}`"
             )));
         }
     }
-    Ok(LoadedLibrary {
+    Ok(LoadedLegacyLibrary {
+        schema,
         packs,
         profiles,
-        legacy_source_hint: schema.legacy_source,
     })
 }
 
-fn validate_pack_document(document: &PackDocument, directory_id: &str) -> Result<(), ArmError> {
-    if document.schema_version != SCHEMA_VERSION {
+fn validate_legacy_owned_files(
+    root: &Path,
+    directory: &Path,
+    declared: &BTreeSet<String>,
+) -> Result<(), ArmError> {
+    for path in sorted_entries(directory)? {
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| ArmError::io(path.display().to_string(), error))?;
+        if metadata.is_dir() {
+            validate_legacy_owned_files(root, &path, declared)?;
+            continue;
+        }
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| ArmError::InvalidLibrary(path.display().to_string()))?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if !metadata.is_file() || !declared.contains(&relative) {
+            return Err(ArmError::InvalidLibrary(format!(
+                "legacy Rule Pack contains unmanaged entry `{relative}`; migration will not remove it"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_profile_document(
+    document: &ProfileDocument,
+    directory_id: &str,
+) -> Result<(), ArmError> {
+    if document.schema_version != LIBRARY_SCHEMA_VERSION {
+        return Err(ArmError::InvalidLibrary(format!(
+            "Profile `{directory_id}` uses an unsupported schema"
+        )));
+    }
+    validate_id(&document.id)?;
+    validate_label("profile name", &document.name, 80)?;
+    validate_label("profile description", &document.description, 240)?;
+    if document.id != directory_id {
+        return Err(ArmError::InvalidLibrary(format!(
+            "Profile id `{}` does not match directory `{directory_id}`",
+            document.id
+        )));
+    }
+    if document.instructions.first().map(String::as_str) != Some(ENTRYPOINT_FILE) {
+        return Err(ArmError::InvalidLibrary(format!(
+            "Profile `{directory_id}` must declare AGENTS.md as its first instruction file"
+        )));
+    }
+    let mut seen = BTreeSet::new();
+    for path in &document.instructions {
+        validate_instruction_path(path)?;
+        if !seen.insert(path) {
+            return Err(ArmError::InvalidLibrary(format!(
+                "Profile `{directory_id}` declares `{path}` more than once"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn validate_legacy_pack_document(
+    document: &LegacyPackDocument,
+    directory_id: &str,
+) -> Result<(), ArmError> {
+    if document.schema_version != LEGACY_LIBRARY_SCHEMA_VERSION {
         return Err(ArmError::InvalidLibrary(format!(
             "Rule Pack `{directory_id}` uses an unsupported schema"
         )));
@@ -1150,12 +1670,12 @@ fn validate_pack_document(document: &PackDocument, directory_id: &str) -> Result
     Ok(())
 }
 
-fn validate_profile_document(
-    document: &ProfileDocument,
+fn validate_legacy_profile_document(
+    document: &LegacyProfileDocument,
     file_id: &str,
-    packs: &BTreeMap<String, LoadedPack>,
+    packs: &BTreeMap<String, LoadedLegacyPack>,
 ) -> Result<(), ArmError> {
-    if document.schema_version != SCHEMA_VERSION {
+    if document.schema_version != LEGACY_LIBRARY_SCHEMA_VERSION {
         return Err(ArmError::InvalidLibrary(format!(
             "Profile `{file_id}` uses an unsupported schema"
         )));
@@ -1169,15 +1689,11 @@ fn validate_profile_document(
             document.id
         )));
     }
-    validate_pack_selection_from_map(packs, &document.packs)
+    validate_legacy_pack_selection(packs, &document.packs)
 }
 
-fn validate_pack_selection(loaded: &LoadedLibrary, pack_ids: &[String]) -> Result<(), ArmError> {
-    validate_pack_selection_from_map(&loaded.packs, pack_ids)
-}
-
-fn validate_pack_selection_from_map(
-    packs: &BTreeMap<String, LoadedPack>,
+fn validate_legacy_pack_selection(
+    packs: &BTreeMap<String, LoadedLegacyPack>,
     pack_ids: &[String],
 ) -> Result<(), ArmError> {
     if pack_ids.is_empty() {
@@ -1189,7 +1705,9 @@ fn validate_pack_selection_from_map(
     for id in pack_ids {
         validate_id(id)?;
         if !packs.contains_key(id) {
-            return Err(ArmError::UnknownPack(id.clone()));
+            return Err(ArmError::InvalidLibrary(format!(
+                "legacy Profile references unknown Rule Pack `{id}`"
+            )));
         }
         if !seen.insert(id) {
             return Err(ArmError::InvalidLibrary(format!(
@@ -1220,9 +1738,9 @@ fn validate_instruction_path(value: &str) -> Result<(), ArmError> {
 fn validate_id(id: &str) -> Result<(), ArmError> {
     let valid = !id.is_empty()
         && id.len() <= 64
-        && id
-            .bytes()
-            .all(|byte| byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_')
+        && id.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
+        })
         && id.as_bytes()[0].is_ascii_alphanumeric();
     if valid {
         Ok(())
@@ -1243,88 +1761,58 @@ fn validate_label(kind: &str, value: &str, max: usize) -> Result<(), ArmError> {
     Ok(())
 }
 
-fn render_default_profile(
-    library_root: &Path,
-    rules: &str,
-) -> Result<RenderedProfile, ArmError> {
-    let pack_document = PackDocument {
-        schema_version: SCHEMA_VERSION,
-        id: "base".into(),
-        name: "Base rules".into(),
-        description: "Rules shared by every local profile.".into(),
-        instructions: vec![ENTRYPOINT_FILE.into()],
-    };
-    let pack = LoadedPack {
-        document: pack_document,
+fn render_default_profile(library_root: &Path, rules: &str) -> Result<RenderedProfile, ArmError> {
+    let profile = LoadedProfile {
+        document: ProfileDocument {
+            schema_version: LIBRARY_SCHEMA_VERSION,
+            id: "default".into(),
+            name: "Default".into(),
+            description: "The initial machine profile.".into(),
+            instructions: vec![ENTRYPOINT_FILE.into()],
+        },
         files: vec![LoadedRuleFile {
             relative_path: ENTRYPOINT_FILE.into(),
             path: library_root
-                .join(PACKS_DIR)
-                .join("base")
+                .join(PROFILES_DIR)
+                .join("default")
                 .join(ENTRYPOINT_FILE),
             content: rules.into(),
             digest: short_digest(rules),
             modified_at: None,
         }],
     };
-    let profile = ProfileDocument {
-        schema_version: SCHEMA_VERSION,
-        id: "default".into(),
-        name: "Default".into(),
-        description: "The initial machine profile.".into(),
-        packs: vec!["base".into()],
-    };
-    render_profile(
-        &LoadedLibrary {
-            packs: BTreeMap::from([("base".into(), pack)]),
-            profiles: BTreeMap::new(),
-            legacy_source_hint: None,
-        },
-        &profile,
-    )
+    render_profile(&profile)
 }
 
-fn render_profile(
-    loaded: &LoadedLibrary,
-    profile: &ProfileDocument,
-) -> Result<RenderedProfile, ArmError> {
-    validate_pack_selection(loaded, &profile.packs)?;
-    let mut source_material = format!("profile:{}\n", profile.id);
+fn render_profile(profile: &LoadedProfile) -> Result<RenderedProfile, ArmError> {
+    let mut source_material = format!("profile:{}\n", profile.document.id);
     let mut sources = Vec::new();
     let mut content = format!(
-        "<!-- Generated by Agent Rules Manager. Edit Rule Pack sources, not this file. -->\n<!-- Profile: {} -->\n",
-        profile.id
+        "<!-- Generated by Agent Rules Manager. Edit Profile sources, not this file. -->\n<!-- Profile: {} -->\n",
+        profile.document.id
     );
-    for pack_id in &profile.packs {
-        let pack = loaded
-            .packs
-            .get(pack_id)
-            .ok_or_else(|| ArmError::UnknownPack(pack_id.clone()))?;
-        for file in &pack.files {
-            let logical = format!("packs/{pack_id}/{}", file.relative_path);
-            source_material.push_str(&logical);
-            source_material.push('\0');
-            source_material.push_str(&file.content);
-            source_material.push('\0');
-            content.push_str(&format!("\n<!-- Source: {logical} -->\n"));
-            content.push_str(file.content.trim_end_matches('\n'));
-            content.push('\n');
-            sources.push(RuntimeSource {
-                pack_id: pack_id.clone(),
-                path: file.relative_path.clone(),
-                digest: file.digest.clone(),
-            });
-        }
+    for file in &profile.files {
+        let logical = format!("profiles/{}/{}", profile.document.id, file.relative_path);
+        source_material.push_str(&logical);
+        source_material.push('\0');
+        source_material.push_str(&file.content);
+        source_material.push('\0');
+        content.push_str(&format!("\n<!-- Source: {logical} -->\n"));
+        content.push_str(file.content.trim_end_matches('\n'));
+        content.push('\n');
+        sources.push(RuntimeSource {
+            path: file.relative_path.clone(),
+            digest: file.digest.clone(),
+        });
     }
     let profile_digest = short_digest(&source_material);
     let rendered_digest = short_digest(&content);
-    let runtime_name = format!("{}-{profile_digest}", profile.id);
+    let runtime_name = format!("{}-{profile_digest}", profile.document.id);
     let manifest = RuntimeManifest {
-        schema_version: SCHEMA_VERSION,
-        profile_id: profile.id.clone(),
+        schema_version: RUNTIME_SCHEMA_VERSION,
+        profile_id: profile.document.id.clone(),
         profile_digest: profile_digest.clone(),
         rendered_digest: rendered_digest.clone(),
-        packs: profile.packs.clone(),
         sources,
     };
     Ok(RenderedProfile {
@@ -1334,7 +1822,10 @@ fn render_profile(
     })
 }
 
-fn inspect_current(library_root: &Path, rendered: &RenderedProfile) -> Result<RuntimeState, ArmError> {
+fn inspect_current(
+    library_root: &Path,
+    rendered: &RenderedProfile,
+) -> Result<RuntimeState, ArmError> {
     let current = library_root.join(CURRENT_LINK);
     let state = read_file_state(&current)?;
     match state {
@@ -1358,42 +1849,26 @@ fn inspect_current(library_root: &Path, rendered: &RenderedProfile) -> Result<Ru
     }
 }
 
-fn ensure_runtime(library_root: &Path, rendered: &RenderedProfile) -> Result<PathBuf, ArmError> {
-    let runtime_root = library_root.join(RUNTIME_DIR);
-    fs::create_dir_all(&runtime_root)
-        .map_err(|error| ArmError::io(runtime_root.display().to_string(), error))?;
-    let target = runtime_root.join(&rendered.runtime_name);
-    if path_entry_exists(&target)? {
-        if runtime_matches(&target, rendered)? {
-            return Ok(target);
+fn prepare_runtime_changes(
+    runtime_path: &Path,
+    rendered: &RenderedProfile,
+) -> Result<Vec<PreparedChange>, ArmError> {
+    if path_entry_exists(runtime_path)? {
+        if runtime_matches(runtime_path, rendered)? {
+            return Ok(Vec::new());
         }
         return Err(ArmError::Blocked(format!(
             "immutable runtime already exists with unexpected content: {}",
-            target.display()
+            runtime_path.display()
         )));
     }
-    let temporary = runtime_root.join(format!(
-        ".render-{}-{}",
-        std::process::id(),
-        Utc::now().timestamp_nanos_opt().unwrap_or_default()
-    ));
-    fs::create_dir(&temporary)
-        .map_err(|error| ArmError::io(temporary.display().to_string(), error))?;
-    let result = (|| {
-        write_atomic(&temporary.join(ENTRYPOINT_FILE), &rendered.content)?;
-        write_atomic(
-            &temporary.join("manifest.json"),
-            &(pretty_json(&rendered.manifest)? + "\n"),
-        )?;
-        fs::rename(&temporary, &target)
-            .map_err(|error| ArmError::io(target.display().to_string(), error))?;
-        Ok::<(), ArmError>(())
-    })();
-    if result.is_err() && temporary.exists() {
-        let _ = fs::remove_dir_all(&temporary);
-    }
-    result?;
-    Ok(target)
+    Ok(vec![
+        missing_file_change(runtime_path.join(ENTRYPOINT_FILE), rendered.content.clone())?,
+        missing_file_change(
+            runtime_path.join("manifest.json"),
+            pretty_json(&rendered.manifest)? + "\n",
+        )?,
+    ])
 }
 
 fn runtime_matches(path: &Path, rendered: &RenderedProfile) -> Result<bool, ArmError> {
@@ -1424,11 +1899,17 @@ fn runtime_matches(path: &Path, rendered: &RenderedProfile) -> Result<bool, ArmE
 
 fn read_machine(state_root: &Path) -> Result<Option<MachineDocument>, ArmError> {
     let path = state_root.join(MACHINE_FILE);
-    if !path_entry_exists(&path)? {
-        return Ok(None);
-    }
-    let document: MachineDocument = read_json(&path)?;
-    if document.schema_version != SCHEMA_VERSION {
+    let document: MachineDocument = match read_file_state(&path)? {
+        FileState::Missing => return Ok(None),
+        FileState::File { content } => serde_json::from_str(&content)?,
+        FileState::Symlink { .. } => {
+            return Err(ArmError::InvalidLibrary(format!(
+                "machine state must be a regular file: {}",
+                path.display()
+            )))
+        }
+    };
+    if document.schema_version != MACHINE_SCHEMA_VERSION {
         return Err(ArmError::InvalidLibrary(
             "machine state uses an unsupported schema".into(),
         ));
@@ -1463,6 +1944,80 @@ fn inspect_rendered_source(
     ))
 }
 
+fn collect_missing_parent_directories(changes: &[PreparedChange]) -> Result<Vec<String>, ArmError> {
+    let mut directories = BTreeSet::new();
+    for change in changes {
+        if change.desired == FileState::Missing {
+            continue;
+        }
+        let mut cursor = change.path.parent();
+        while let Some(directory) = cursor {
+            match fs::symlink_metadata(directory) {
+                Ok(metadata) => {
+                    if !metadata.is_dir() {
+                        return Err(ArmError::UnsupportedEntry(directory.display().to_string()));
+                    }
+                    break;
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    directories.insert(directory.to_path_buf());
+                    cursor = directory.parent();
+                }
+                Err(error) => {
+                    return Err(ArmError::io(directory.display().to_string(), error));
+                }
+            }
+        }
+    }
+    let mut directories = directories.into_iter().collect::<Vec<_>>();
+    directories.sort_by(|left, right| {
+        right
+            .components()
+            .count()
+            .cmp(&left.components().count())
+            .then_with(|| right.cmp(left))
+    });
+    Ok(directories
+        .into_iter()
+        .map(|path| path.display().to_string())
+        .collect())
+}
+
+fn cleanup_created_directories(directories: &[String]) -> Result<(), ArmError> {
+    let mut directories = directories.iter().map(PathBuf::from).collect::<Vec<_>>();
+    directories.sort_by(|left, right| {
+        right
+            .components()
+            .count()
+            .cmp(&left.components().count())
+            .then_with(|| right.cmp(left))
+    });
+    for directory in directories {
+        let metadata = match fs::symlink_metadata(&directory) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => continue,
+            Err(error) => return Err(ArmError::io(directory.display().to_string(), error)),
+        };
+        if !metadata.is_dir() {
+            continue;
+        }
+        let mut entries = fs::read_dir(&directory)
+            .map_err(|error| ArmError::io(directory.display().to_string(), error))?;
+        if entries.next().is_none() {
+            match fs::remove_dir(&directory) {
+                Ok(()) => {}
+                Err(error)
+                    if matches!(
+                        error.kind(),
+                        std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                    ) => {}
+                Err(error) => return Err(ArmError::io(directory.display().to_string(), error)),
+            }
+        }
+    }
+    Ok(())
+}
+
 fn apply_changes(
     state_root: &Path,
     operation: &str,
@@ -1474,6 +2029,7 @@ fn apply_changes(
             backup_id: None,
         });
     }
+    let created_directories = collect_missing_parent_directories(&changes)?;
     let backup_id = Utc::now().format("%Y%m%dT%H%M%S%.9fZ").to_string();
     let backup = BackupSnapshot {
         id: backup_id.clone(),
@@ -1489,6 +2045,7 @@ fn apply_changes(
                 })
             })
             .collect::<Result<Vec<_>, ArmError>>()?,
+        created_directories: created_directories.clone(),
     };
     let backup_path = write_backup(state_root, &backup)?;
     let mut completed = 0;
@@ -1496,16 +2053,20 @@ fn apply_changes(
         let current = match read_file_state(&change.path) {
             Ok(current) => current,
             Err(error) => {
-                restore_completed(&changes[..completed]);
+                if restore_completed(&changes[..completed], &created_directories) {
+                    let _ = archive_backup(state_root, &backup_path);
+                }
                 return Err(error);
             }
         };
         if current != change.original {
-            restore_completed(&changes[..completed]);
+            if restore_completed(&changes[..completed], &created_directories) {
+                let _ = archive_backup(state_root, &backup_path);
+            }
             return Err(ArmError::ApplyDrift(change.path.display().to_string()));
         }
         if let Err(error) = write_file_state(&change.path, &change.desired) {
-            if restore_completed(&changes[..completed]) {
+            if restore_completed(&changes[..completed], &created_directories) {
                 let _ = archive_backup(state_root, &backup_path);
             }
             return Err(error);
@@ -1513,12 +2074,16 @@ fn apply_changes(
         let written = match read_file_state(&change.path) {
             Ok(written) => written,
             Err(error) => {
-                restore_completed(&changes[..=completed]);
+                if restore_completed(&changes[..=completed], &created_directories) {
+                    let _ = archive_backup(state_root, &backup_path);
+                }
                 return Err(error);
             }
         };
         if written != change.desired {
-            restore_completed(&changes[..=completed]);
+            if restore_completed(&changes[..=completed], &created_directories) {
+                let _ = archive_backup(state_root, &backup_path);
+            }
             return Err(ArmError::ApplyDrift(change.path.display().to_string()));
         }
         completed += 1;
@@ -1576,7 +2141,7 @@ fn archive_backup(state_root: &Path, path: &Path) -> Result<(), ArmError> {
         .map_err(|error| ArmError::io(path.display().to_string(), error))
 }
 
-fn restore_completed(changes: &[PreparedChange]) -> bool {
+fn restore_completed(changes: &[PreparedChange], created_directories: &[String]) -> bool {
     let mut restored = true;
     for change in changes.iter().rev() {
         match read_file_state(&change.path) {
@@ -1588,6 +2153,9 @@ fn restore_completed(changes: &[PreparedChange]) -> bool {
             Ok(current) if current == change.original => {}
             _ => restored = false,
         }
+    }
+    if restored && cleanup_created_directories(created_directories).is_err() {
+        restored = false;
     }
     restored
 }
@@ -1601,8 +2169,8 @@ fn read_file_state(path: &Path) -> Result<FileState, ArmError> {
         Err(error) => return Err(ArmError::io(path.display().to_string(), error)),
     };
     if metadata.file_type().is_symlink() {
-        let target = fs::read_link(path)
-            .map_err(|error| ArmError::io(path.display().to_string(), error))?;
+        let target =
+            fs::read_link(path).map_err(|error| ArmError::io(path.display().to_string(), error))?;
         return Ok(FileState::Symlink {
             target: target.display().to_string(),
         });
@@ -1798,19 +2366,80 @@ mod tests {
         (temporary, library, state)
     }
 
+    fn write_json_fixture<T: Serialize>(path: &Path, value: &T) {
+        fs::create_dir_all(path.parent().expect("fixture parent")).expect("fixture directory");
+        fs::write(path, pretty_json(value).expect("fixture json") + "\n").expect("fixture write");
+    }
+
+    fn write_v1_library(library: &Path, state: &Path) {
+        let schema = SchemaDocument {
+            schema_version: LEGACY_LIBRARY_SCHEMA_VERSION,
+            format: "agent-rules-library".into(),
+            sync: SyncPolicy {
+                include: vec![
+                    "schema.json".into(),
+                    "packs/**".into(),
+                    "profiles/**".into(),
+                ],
+                exclude: vec![
+                    ".runtime/**".into(),
+                    "current".into(),
+                    "machine state".into(),
+                ],
+                machine_selection: "local".into(),
+            },
+            legacy_source: None,
+        };
+        let base = LegacyPackDocument {
+            schema_version: LEGACY_LIBRARY_SCHEMA_VERSION,
+            id: "base".into(),
+            name: "Base".into(),
+            description: "Shared rules".into(),
+            instructions: vec!["AGENTS.md".into(), "rules/review.md".into()],
+        };
+        let work = LegacyPackDocument {
+            schema_version: LEGACY_LIBRARY_SCHEMA_VERSION,
+            id: "work".into(),
+            name: "Work".into(),
+            description: "Work rules".into(),
+            instructions: vec!["AGENTS.md".into()],
+        };
+        let profile = LegacyProfileDocument {
+            schema_version: LEGACY_LIBRARY_SCHEMA_VERSION,
+            id: "default".into(),
+            name: "Default".into(),
+            description: "Default route".into(),
+            packs: vec!["base".into(), "work".into()],
+        };
+        let machine = MachineDocument {
+            schema_version: MACHINE_SCHEMA_VERSION,
+            active_profile_id: "default".into(),
+        };
+
+        write_json_fixture(&library.join(SCHEMA_FILE), &schema);
+        write_json_fixture(&library.join("packs/base/pack.json"), &base);
+        fs::write(library.join("packs/base/AGENTS.md"), "# Base\n").expect("base rules");
+        fs::create_dir_all(library.join("packs/base/rules")).expect("base rule directory");
+        fs::write(library.join("packs/base/rules/review.md"), "# Review\n").expect("review rules");
+        write_json_fixture(&library.join("packs/work/pack.json"), &work);
+        fs::write(library.join("packs/work/AGENTS.md"), "# Work\n").expect("work rules");
+        write_json_fixture(&library.join("profiles/default.json"), &profile);
+        write_json_fixture(&state.join(MACHINE_FILE), &machine);
+    }
+
     #[test]
-    fn initialize_creates_pack_profile_runtime_and_local_selection() {
+    fn initialize_creates_profile_runtime_and_local_selection() {
         let (_temporary, library, state) = fixture();
         let plan = plan_initialize(&library, &state).expect("plan");
         assert!(!plan.blocked);
-        assert_eq!(plan.change_count, 8);
+        assert_eq!(plan.change_count, 7);
 
         initialize(&library, &state).expect("initialize");
         let snapshot = inspect(&library, &state).expect("inspect");
         assert_eq!(snapshot.state, LibraryState::Ready);
         assert_eq!(snapshot.runtime_state, RuntimeState::Current);
         assert_eq!(snapshot.active_profile_id.as_deref(), Some("default"));
-        assert_eq!(snapshot.packs[0].files[0].path, "AGENTS.md");
+        assert_eq!(snapshot.profiles[0].files[0].path, "AGENTS.md");
         assert!(library.join("current/AGENTS.md").is_file());
         assert!(library.join("current").is_symlink());
     }
@@ -1822,14 +2451,14 @@ mod tests {
         fs::write(library.join(LEGACY_SOURCE_FILE), "# My existing rules\n").expect("legacy");
 
         let plan = plan_initialize(&library, &state).expect("plan");
-        assert_eq!(plan.change_count, 9);
+        assert_eq!(plan.change_count, 8);
         assert!(plan.steps.iter().any(|step| step.action == "copyLegacy"));
         assert!(plan.steps.iter().any(|step| step.action == "removeLegacy"));
         initialize(&library, &state).expect("initialize");
 
         assert!(!library.join(LEGACY_SOURCE_FILE).exists());
         assert_eq!(
-            fs::read_to_string(library.join("packs/base/AGENTS.md")).unwrap(),
+            fs::read_to_string(library.join("profiles/default/AGENTS.md")).unwrap(),
             "# My existing rules\n"
         );
         let snapshot = inspect(&library, &state).expect("inspect");
@@ -1845,17 +2474,75 @@ mod tests {
             fs::read_to_string(library.join(LEGACY_SOURCE_FILE)).unwrap(),
             "# My existing rules\n"
         );
-        assert!(!library.join("packs/base/AGENTS.md").exists());
+        assert!(!library.join("profiles/default/AGENTS.md").exists());
+        assert!(!library.join(RUNTIME_DIR).exists());
+        assert_eq!(
+            inspect(&library, &state)
+                .expect("inspect restored legacy")
+                .state,
+            LibraryState::Legacy
+        );
+        assert!(
+            !plan_initialize(&library, &state)
+                .expect("replan restored legacy")
+                .blocked
+        );
+    }
+
+    #[test]
+    fn empty_library_initialization_rolls_back_without_directory_residue() {
+        let (_temporary, library, state) = fixture();
+        initialize(&library, &state).expect("initialize");
+
+        rollback_library_latest(&state).expect("rollback activation");
+        rollback_library_latest(&state).expect("rollback initialization");
+
+        assert!(!library.exists());
+        assert_eq!(
+            inspect(&library, &state).expect("inspect empty").state,
+            LibraryState::Empty
+        );
+    }
+
+    #[test]
+    fn failed_library_transaction_archives_its_restored_backup() {
+        let (_temporary, library, state) = fixture();
+        let first = library.join("profile/first.md");
+        let second = library.join("profile/second.md");
+        let changes = vec![
+            missing_file_change(first.clone(), "first\n".into()).expect("first change"),
+            missing_file_change(second.clone(), "second\n".into()).expect("second change"),
+        ];
+        fs::create_dir_all(second.parent().unwrap()).expect("external parent");
+        fs::write(&second, "external\n").expect("external drift");
+
+        assert!(matches!(
+            apply_changes(&state, "testFailure", changes),
+            Err(ArmError::ApplyDrift(_))
+        ));
+        assert!(!first.exists());
+        assert_eq!(fs::read_to_string(second).unwrap(), "external\n");
+        assert_eq!(latest_backup_path(&state).expect("latest backup"), None);
+        assert_eq!(
+            sorted_entries(&state.join("library-backups/restored"))
+                .expect("restored backups")
+                .len(),
+            1
+        );
     }
 
     #[test]
     fn multiple_markdown_sources_render_in_manifest_order() {
         let (_temporary, library, state) = fixture();
         initialize(&library, &state).expect("initialize");
-        let add_plan = plan_add_pack_file(&library, "base", "rules/review.md").expect("plan");
+        let add_plan = plan_add_profile_file(&library, "default", "rules/review.md").expect("plan");
         assert_eq!(add_plan.change_count, 2);
-        add_pack_file(&library, &state, "base", "rules/review.md").expect("add file");
-        fs::write(library.join("packs/base/rules/review.md"), "# Review\n").expect("rule edit");
+        add_profile_file(&library, &state, "default", "rules/review.md").expect("add file");
+        fs::write(
+            library.join("profiles/default/rules/review.md"),
+            "# Review\n",
+        )
+        .expect("rule edit");
 
         assert_eq!(
             inspect(&library, &state).unwrap().runtime_state,
@@ -1866,8 +2553,8 @@ mod tests {
         assert!(plan.steps.iter().any(|step| step.action == "renderRuntime"));
         activate_profile(&library, &state, "default").expect("refresh");
         let rendered = fs::read_to_string(library.join("current/AGENTS.md")).unwrap();
-        assert!(rendered.contains("<!-- Source: packs/base/AGENTS.md -->"));
-        assert!(rendered.contains("<!-- Source: packs/base/rules/review.md -->"));
+        assert!(rendered.contains("<!-- Source: profiles/default/AGENTS.md -->"));
+        assert!(rendered.contains("<!-- Source: profiles/default/rules/review.md -->"));
         assert!(rendered.find("AGENTS.md").unwrap() < rendered.find("review.md").unwrap());
         assert!(!rendered.contains(&library.display().to_string()));
     }
@@ -1876,16 +2563,8 @@ mod tests {
     fn profile_switch_is_local_and_rollback_refuses_drift() {
         let (_temporary, library, state) = fixture();
         initialize(&library, &state).expect("initialize");
-        create_pack(&library, &state, "work", "Work", "").expect("pack");
-        create_profile(
-            &library,
-            &state,
-            "work",
-            "Work",
-            "",
-            &["base".into(), "work".into()],
-        )
-        .expect("profile");
+        create_profile(&library, &state, "work", "Work", "").expect("profile");
+        fs::write(library.join("profiles/work/AGENTS.md"), "# Work\n").expect("work rules");
         activate_profile(&library, &state, "work").expect("activate");
         assert_eq!(
             inspect(&library, &state)
@@ -1905,16 +2584,18 @@ mod tests {
     fn supplemental_file_transaction_rolls_back_manifest_and_new_source_together() {
         let (_temporary, library, state) = fixture();
         initialize(&library, &state).expect("initialize");
-        let manifest = library.join("packs/base/pack.json");
+        let manifest = library.join("profiles/default/profile.json");
         let original = fs::read_to_string(&manifest).expect("original manifest");
 
-        add_pack_file(&library, &state, "base", "rules/testing.md").expect("add file");
-        assert!(library.join("packs/base/rules/testing.md").is_file());
-        assert!(fs::read_to_string(&manifest).unwrap().contains("rules/testing.md"));
+        add_profile_file(&library, &state, "default", "rules/testing.md").expect("add file");
+        assert!(library.join("profiles/default/rules/testing.md").is_file());
+        assert!(fs::read_to_string(&manifest)
+            .unwrap()
+            .contains("rules/testing.md"));
 
         rollback_library_latest(&state).expect("rollback");
         assert_eq!(fs::read_to_string(&manifest).unwrap(), original);
-        assert!(!library.join("packs/base/rules/testing.md").exists());
+        assert!(!library.join("profiles/default/rules/testing.md").exists());
     }
 
     #[test]
@@ -1923,21 +2604,16 @@ mod tests {
         initialize(&library, &state).expect("initialize");
         let synced = temporary.path().join("synced-library");
         let synced_state = temporary.path().join("synced-state");
-        fs::create_dir_all(synced.join("packs/base")).expect("pack dir");
-        fs::create_dir_all(synced.join("profiles")).expect("profile dir");
+        fs::create_dir_all(synced.join("profiles/default")).expect("profile dir");
         for (source, target) in [
             (library.join("schema.json"), synced.join("schema.json")),
             (
-                library.join("packs/base/pack.json"),
-                synced.join("packs/base/pack.json"),
+                library.join("profiles/default/profile.json"),
+                synced.join("profiles/default/profile.json"),
             ),
             (
-                library.join("packs/base/AGENTS.md"),
-                synced.join("packs/base/AGENTS.md"),
-            ),
-            (
-                library.join("profiles/default.json"),
-                synced.join("profiles/default.json"),
+                library.join("profiles/default/AGENTS.md"),
+                synced.join("profiles/default/AGENTS.md"),
             ),
         ] {
             fs::copy(&source, &target).expect("sync source");
@@ -1952,13 +2628,172 @@ mod tests {
     }
 
     #[test]
-    fn invalid_pack_path_cannot_escape_its_directory() {
+    fn v1_library_migrates_into_profile_owned_sources_and_rolls_back() {
+        let (_temporary, library, state) = fixture();
+        write_v1_library(&library, &state);
+
+        let before = inspect(&library, &state).expect("inspect v1");
+        assert_eq!(before.state, LibraryState::Upgrade);
+        let plan = plan_initialize(&library, &state).expect("migration plan");
+        assert!(!plan.blocked);
+        assert_eq!(plan.operation, "upgradeLibrary");
+        assert!(plan.steps.iter().any(|step| step.action == "upgradeSchema"));
+        assert!(plan
+            .steps
+            .iter()
+            .any(|step| step.action == "removeLegacyPack"));
+
+        initialize(&library, &state).expect("migrate");
+        let after = inspect(&library, &state).expect("inspect v2");
+        assert_eq!(after.state, LibraryState::Ready);
+        assert_eq!(after.runtime_state, RuntimeState::Current);
+        assert_eq!(after.profiles[0].id, "default");
+        assert_eq!(
+            after.profiles[0]
+                .files
+                .iter()
+                .map(|file| file.path.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "AGENTS.md",
+                "rules/base/rules/review.md",
+                "rules/work/AGENTS.md",
+            ]
+        );
+        assert_eq!(
+            fs::read_to_string(library.join("profiles/default/AGENTS.md")).unwrap(),
+            "# Base\n"
+        );
+        assert_eq!(
+            fs::read_to_string(library.join("profiles/default/rules/base/rules/review.md"))
+                .unwrap(),
+            "# Review\n"
+        );
+        assert_eq!(
+            fs::read_to_string(library.join("profiles/default/rules/work/AGENTS.md")).unwrap(),
+            "# Work\n"
+        );
+        assert!(!library.join("profiles/default.json").exists());
+        assert!(!library.join("packs/base/pack.json").exists());
+
+        rollback_library_latest(&state).expect("rollback activation");
+        rollback_library_latest(&state).expect("rollback migration");
+        let schema: SchemaDocument = read_json(&library.join(SCHEMA_FILE)).expect("v1 schema");
+        assert_eq!(schema.schema_version, LEGACY_LIBRARY_SCHEMA_VERSION);
+        assert_eq!(
+            fs::read_to_string(library.join("packs/base/AGENTS.md")).unwrap(),
+            "# Base\n"
+        );
+        assert!(library.join("profiles/default.json").is_file());
+        assert!(!library.join("profiles/default/profile.json").exists());
+        assert_eq!(
+            inspect(&library, &state)
+                .expect("inspect rolled-back v1")
+                .state,
+            LibraryState::Upgrade
+        );
+        assert!(
+            !plan_initialize(&library, &state)
+                .expect("replan rolled-back v1")
+                .blocked
+        );
+    }
+
+    #[test]
+    fn v1_migration_blocks_unmanaged_pack_entries() {
+        let (_temporary, library, state) = fixture();
+        write_v1_library(&library, &state);
+        fs::write(library.join("packs/base/notes.txt"), "keep me\n").expect("unmanaged file");
+
+        let plan = plan_initialize(&library, &state).expect("migration plan");
+        assert!(plan.blocked);
+        assert!(plan.summary.contains("unmanaged entry"));
+        assert!(matches!(
+            initialize(&library, &state),
+            Err(ArmError::Blocked(_))
+        ));
+        assert_eq!(
+            fs::read_to_string(library.join("packs/base/notes.txt")).unwrap(),
+            "keep me\n"
+        );
+    }
+
+    #[test]
+    fn v1_migration_blocks_unused_packs() {
+        let (_temporary, library, state) = fixture();
+        write_v1_library(&library, &state);
+        let unused = LegacyPackDocument {
+            schema_version: LEGACY_LIBRARY_SCHEMA_VERSION,
+            id: "unused".into(),
+            name: "Unused".into(),
+            description: String::new(),
+            instructions: vec!["AGENTS.md".into()],
+        };
+        write_json_fixture(&library.join("packs/unused/pack.json"), &unused);
+        fs::write(library.join("packs/unused/AGENTS.md"), "# Keep\n").expect("unused rules");
+
+        let plan = plan_initialize(&library, &state).expect("migration plan");
+        assert!(plan.blocked);
+        assert!(plan.summary.contains("not used by any Profile"));
+        assert!(library.join("packs/unused/AGENTS.md").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn v1_migration_infers_machine_selection_from_managed_current() {
+        let (_temporary, library, state) = fixture();
+        write_v1_library(&library, &state);
+        fs::remove_file(state.join(MACHINE_FILE)).expect("remove machine selection");
+        let runtime = library.join(".runtime/default-old");
+        fs::create_dir_all(&runtime).expect("legacy runtime");
+        fs::write(
+            runtime.join("manifest.json"),
+            "{\"schemaVersion\":1,\"profileId\":\"default\"}\n",
+        )
+        .expect("legacy runtime manifest");
+        std::os::unix::fs::symlink(".runtime/default-old", library.join(CURRENT_LINK))
+            .expect("legacy current");
+
+        let plan = plan_initialize(&library, &state).expect("migration plan");
+        assert!(!plan.blocked);
+        assert!(plan
+            .steps
+            .iter()
+            .any(|step| step.action == "selectLocalProfile"));
+        initialize(&library, &state).expect("migrate inferred selection");
+
+        let snapshot = inspect(&library, &state).expect("inspect migrated library");
+        assert_eq!(snapshot.active_profile_id.as_deref(), Some("default"));
+        assert_eq!(snapshot.runtime_state, RuntimeState::Current);
+    }
+
+    #[test]
+    fn v1_migration_without_machine_state_blocks_unmanaged_current() {
+        let (_temporary, library, state) = fixture();
+        write_v1_library(&library, &state);
+        fs::remove_file(state.join(MACHINE_FILE)).expect("remove machine selection");
+        fs::write(library.join(CURRENT_LINK), "do not replace\n").expect("foreign current");
+
+        let plan = plan_initialize(&library, &state).expect("migration plan");
+        assert!(plan.blocked);
+        assert!(plan.summary.contains("unmanaged `current`"));
+        assert_eq!(
+            fs::read_to_string(library.join(CURRENT_LINK)).unwrap(),
+            "do not replace\n"
+        );
+    }
+
+    #[test]
+    fn invalid_profile_path_cannot_escape_its_directory() {
         let (_temporary, library, state) = fixture();
         initialize(&library, &state).expect("initialize");
-        let path = library.join("packs/base/pack.json");
-        let mut pack: PackDocument = read_json(&path).expect("pack");
-        pack.instructions.push("../secret.md".into());
-        write_atomic(&path, &(pretty_json(&pack).unwrap() + "\n")).expect("write");
-        assert!(matches!(inspect(&library, &state), Err(ArmError::InvalidLibrary(_))));
+        let path = library.join("profiles/default/profile.json");
+        let mut profile: ProfileDocument = read_json(&path).expect("profile");
+        profile.instructions.push("../secret.md".into());
+        write_atomic(&path, &(pretty_json(&profile).unwrap() + "\n")).expect("write");
+        assert!(matches!(
+            inspect(&library, &state),
+            Err(ArmError::InvalidLibrary(_))
+        ));
     }
 }
