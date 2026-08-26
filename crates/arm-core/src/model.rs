@@ -35,6 +35,7 @@ pub enum TargetState {
 pub enum TargetKind {
     Missing,
     ConnectedLink,
+    LegacyLink,
     IndependentFile,
     LegacyInclude,
     ForeignLink,
@@ -56,6 +57,51 @@ pub struct AgentStatus {
     pub detail: String,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum LibraryState {
+    Empty,
+    Legacy,
+    Ready,
+    Conflict,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum RuntimeState {
+    Missing,
+    Current,
+    Stale,
+    Conflict,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RuleFileSummary {
+    pub path: String,
+    pub digest: String,
+    pub modified_at: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RulePackSummary {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub files: Vec<RuleFileSummary>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct ProfileSummary {
+    pub id: String,
+    pub name: String,
+    pub description: String,
+    pub pack_ids: Vec<String>,
+    pub is_active: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct ConnectionChange {
@@ -67,11 +113,21 @@ pub struct ConnectionChange {
 #[serde(rename_all = "camelCase")]
 pub struct WorkspaceSnapshot {
     pub library_root: String,
+    pub library_state: LibraryState,
+    pub library_detail: String,
+    pub runtime_state: RuntimeState,
+    /// Stable machine-local projection entrypoint: `<library>/current/AGENTS.md`.
     pub source_path: String,
     pub source_exists: bool,
     pub source_digest: Option<String>,
     pub source_modified_at: Option<String>,
+    pub active_profile_id: Option<String>,
+    pub active_source_path: Option<String>,
+    pub legacy_source_path: Option<String>,
+    pub packs: Vec<RulePackSummary>,
+    pub profiles: Vec<ProfileSummary>,
     pub latest_backup: Option<String>,
+    pub latest_library_backup: Option<String>,
     pub agents: Vec<AgentStatus>,
 }
 
@@ -98,7 +154,32 @@ pub struct ProjectionPlan {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
+pub struct LibraryPlanStep {
+    pub path: String,
+    pub action: String,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryPlan {
+    pub operation: String,
+    pub blocked: bool,
+    pub change_count: usize,
+    pub summary: String,
+    pub steps: Vec<LibraryPlanStep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
 pub struct ApplyOutcome {
+    pub changed: Vec<String>,
+    pub backup_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryMutationOutcome {
     pub changed: Vec<String>,
     pub backup_id: Option<String>,
 }
@@ -120,7 +201,7 @@ pub enum ArmError {
     },
     #[error("invalid state data: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("canonical rules file does not exist: {0}")]
+    #[error("canonical rules entrypoint does not exist: {0}")]
     MissingSource(String),
     #[error("apply is blocked by an unmanaged target: {0}")]
     Blocked(String),
@@ -128,6 +209,14 @@ pub enum ArmError {
     ApplyDrift(String),
     #[error("unknown agent adapter: {0}")]
     UnknownAgent(String),
+    #[error("unknown rule pack: {0}")]
+    UnknownPack(String),
+    #[error("unknown profile: {0}")]
+    UnknownProfile(String),
+    #[error("invalid rule library: {0}")]
+    InvalidLibrary(String),
+    #[error("invalid identifier `{0}`; use lowercase letters, digits, `_`, or `-`")]
+    InvalidId(String),
     #[error("no rollback snapshot is available")]
     NoBackup,
     #[error("rollback stopped because {0} changed after apply")]

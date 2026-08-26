@@ -1,10 +1,12 @@
-import type { AgentStatus, ProjectionPlan } from "../lib/types";
+import type { AgentStatus, ProjectionPlan, RuntimeState } from "../lib/types";
 import { useI18n } from "../lib/i18n";
 import { StatusPill } from "./StatusPill";
 
 interface ProjectionRailProps {
   agents: AgentStatus[];
   sourceDigest?: string;
+  activeProfileName?: string;
+  runtimeState: RuntimeState;
   plan?: ProjectionPlan;
   desiredConnections: Set<string>;
   pendingCount: number;
@@ -18,6 +20,8 @@ interface ProjectionRailProps {
 export function ProjectionRail({
   agents,
   sourceDigest,
+  activeProfileName,
+  runtimeState,
   plan,
   desiredConnections,
   pendingCount,
@@ -41,12 +45,17 @@ export function ProjectionRail({
     if (action === "createIndependentFile") return t("projection.step.createIndependentFile");
     if (action === "detachManagedInclude") return t("projection.step.detachManagedInclude");
     if (action === "migrateLegacyInclude") return t("projection.step.migrateLegacyInclude");
+    if (action === "refreshManagedBlock") {
+      return t("projection.step.refreshManagedBlock");
+    }
+    if (action === "replaceLegacyLink") return t("projection.step.replaceLegacyLink");
     return t("projection.step.change");
   };
 
   const targetDetail = (agent: AgentStatus) => {
     if (agent.targetKind === "missing") return t("projection.detail.missing");
     if (agent.targetKind === "connectedLink") return t("projection.detail.connectedLink");
+    if (agent.targetKind === "legacyLink") return t("projection.detail.legacyLink");
     if (agent.targetKind === "independentFile") return t("projection.detail.independentFile");
     if (agent.targetKind === "legacyInclude") return t("projection.detail.legacyInclude");
     if (agent.targetKind === "foreignLink") return t("projection.detail.foreignLink");
@@ -99,8 +108,8 @@ export function ProjectionRail({
           </span>
           <span className="source-node-copy">
             <span className="node-kicker">{t("projection.canonical")}</span>
-            <strong>AGENTS.md</strong>
-            <code>{sourceDigest ?? t("projection.uninitialized")}</code>
+            <strong>{activeProfileName ?? t("projection.uninitialized")}</strong>
+            <code>current/AGENTS.md · {sourceDigest ?? runtimeState}</code>
           </span>
           <span className="source-port" aria-hidden="true" />
         </div>
@@ -109,7 +118,9 @@ export function ProjectionRail({
           {orderedAgents.map((agent) => {
             const available = agent.installed || agent.connected;
             const desiredConnected = desiredConnections.has(agent.id);
-            const pending = desiredConnected !== agent.connected;
+            const pending =
+              desiredConnected !== agent.connected ||
+              (desiredConnected && agent.state === "drifted");
             const step = plan?.steps.find((candidate) => candidate.agentId === agent.id);
             const previewedAction = step && step.action !== "none";
             const connectionLabel = !available

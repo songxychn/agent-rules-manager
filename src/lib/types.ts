@@ -3,10 +3,13 @@ export type TargetState = "inSync" | "ready" | "drifted" | "conflict";
 export type TargetKind =
   | "missing"
   | "connectedLink"
+  | "legacyLink"
   | "independentFile"
   | "legacyInclude"
   | "foreignLink"
   | "invalidManagedFile";
+export type LibraryState = "empty" | "legacy" | "ready" | "conflict";
+export type RuntimeState = "missing" | "current" | "stale" | "conflict";
 
 export interface AgentStatus {
   id: string;
@@ -26,13 +29,43 @@ export interface ConnectionChange {
   connected: boolean;
 }
 
+export interface RuleFileSummary {
+  path: string;
+  digest: string;
+  modifiedAt?: string;
+}
+
+export interface RulePackSummary {
+  id: string;
+  name: string;
+  description: string;
+  files: RuleFileSummary[];
+}
+
+export interface ProfileSummary {
+  id: string;
+  name: string;
+  description: string;
+  packIds: string[];
+  isActive: boolean;
+}
+
 export interface WorkspaceSnapshot {
   libraryRoot: string;
+  libraryState: LibraryState;
+  libraryDetail: string;
+  runtimeState: RuntimeState;
   sourcePath: string;
   sourceExists: boolean;
   sourceDigest?: string;
   sourceModifiedAt?: string;
+  activeProfileId?: string;
+  activeSourcePath?: string;
+  legacySourcePath?: string;
+  packs: RulePackSummary[];
+  profiles: ProfileSummary[];
   latestBackup?: string;
+  latestLibraryBackup?: string;
   agents: AgentStatus[];
 }
 
@@ -61,7 +94,26 @@ export interface ProjectionPlan {
   steps: PlanStep[];
 }
 
+export interface LibraryPlanStep {
+  path: string;
+  action: string;
+  summary: string;
+}
+
+export interface LibraryPlan {
+  operation: string;
+  blocked: boolean;
+  changeCount: number;
+  summary: string;
+  steps: LibraryPlanStep[];
+}
+
 export interface ApplyOutcome {
+  changed: string[];
+  backupId?: string;
+}
+
+export interface LibraryMutationOutcome {
   changed: string[];
   backupId?: string;
 }
@@ -69,4 +121,22 @@ export interface ApplyOutcome {
 export interface RollbackOutcome {
   restored: string[];
   backupId: string;
+}
+
+export interface PackDraft {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface PackFileDraft {
+  packId: string;
+  relativePath: string;
+}
+
+export interface ProfileDraft {
+  id: string;
+  name: string;
+  description: string;
+  packIds: string[];
 }

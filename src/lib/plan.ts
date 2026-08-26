@@ -12,7 +12,13 @@ export function buildProjectionPlan(
       let action = "none";
       let summary = "Already uses the selected connection mode.";
 
-      if (desiredConnected !== agent.connected) {
+      if (desiredConnected && agent.targetKind === "legacyLink") {
+        action = "replaceLegacyLink";
+        summary = "Move the managed legacy link to current/AGENTS.md.";
+      } else if (desiredConnected && agent.targetKind === "legacyInclude") {
+        action = "migrateLegacyInclude";
+        summary = "Replace the legacy managed include with a symbolic link.";
+      } else if (desiredConnected !== agent.connected) {
         if (desiredConnected && agent.targetKind === "missing") {
           action = "createLink";
           summary = "Create a symbolic link to the canonical rules file.";
@@ -29,10 +35,10 @@ export function buildProjectionPlan(
       }
 
       return {
-      agentId: agent.id,
-      agentLabel: agent.label,
-      targetPath: agent.targetPath,
-      state: agent.state,
+        agentId: agent.id,
+        agentLabel: agent.label,
+        targetPath: agent.targetPath,
+        state: agent.state,
         desiredConnected,
         action,
         summary,

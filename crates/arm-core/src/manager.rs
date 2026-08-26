@@ -1,30 +1,18 @@
 use crate::{
-    default_adapters, AgentAdapter, AgentStatus, ApplyOutcome, ArmError, ConnectionChange,
-    DeployMode, PlanStep, ProjectionPlan, RollbackOutcome, TargetKind, TargetState,
-    WorkspaceSnapshot,
+    default_adapters, library, AgentAdapter, AgentStatus, ApplyOutcome, ArmError,
+    ConnectionChange, DeployMode, LibraryMutationOutcome, LibraryPlan, PlanStep, ProjectionPlan,
+    RollbackOutcome, TargetKind, TargetState, WorkspaceSnapshot,
 };
-use chrono::{DateTime, Utc};
+use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 
-const SOURCE_FILE: &str = "AGENTS.md";
 const INCLUDE_START: &str = "<!-- agent-rules-manager:start -->";
 const INCLUDE_END: &str = "<!-- agent-rules-manager:end -->";
-
-const STARTER_RULES: &str = r#"# Shared agent rules
-
-These instructions apply to every supported coding agent unless a project-level rule is more specific.
-
-## Working style
-
-- Read the relevant code and instructions before editing.
-- Keep changes scoped to the requested behavior.
-- Verify changes in proportion to risk.
-"#;
 
 #[derive(Debug, Clone)]
 pub struct RulesManager {
@@ -96,51 +84,139 @@ impl RulesManager {
     }
 
     pub fn source_path(&self) -> PathBuf {
-        self.library_root.join(SOURCE_FILE)
+        library::source_path(&self.library_root)
     }
 
-    pub fn initialize(&self) -> Result<PathBuf, ArmError> {
-        let source = self.source_path();
-        if source.exists() {
-            return Ok(source);
-        }
-        fs::create_dir_all(&self.library_root)
-            .map_err(|error| ArmError::io(self.library_root.display().to_string(), error))?;
-        write_atomic(&source, STARTER_RULES)?;
-        Ok(source)
+    pub fn plan_initialize(&self) -> Result<LibraryPlan, ArmError> {
+        library::plan_initialize(&self.library_root, &self.state_root)
+    }
+
+    pub fn initialize(&self) -> Result<LibraryMutationOutcome, ArmError> {
+        library::initialize(&self.library_root, &self.state_root)
+    }
+
+    pub fn plan_create_pack(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<LibraryPlan, ArmError> {
+        library::plan_create_pack(&self.library_root, id, name, description)
+    }
+
+    pub fn create_pack(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+    ) -> Result<LibraryMutationOutcome, ArmError> {
+        library::create_pack(&self.library_root, &self.state_root, id, name, description)
+    }
+
+    pub fn plan_add_pack_file(
+        &self,
+        pack_id: &str,
+        relative_path: &str,
+    ) -> Result<LibraryPlan, ArmError> {
+        library::plan_add_pack_file(&self.library_root, pack_id, relative_path)
+    }
+
+    pub fn add_pack_file(
+        &self,
+        pack_id: &str,
+        relative_path: &str,
+    ) -> Result<LibraryMutationOutcome, ArmError> {
+        library::add_pack_file(
+            &self.library_root,
+            &self.state_root,
+            pack_id,
+            relative_path,
+        )
+    }
+
+    pub fn plan_create_profile(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+        pack_ids: &[String],
+    ) -> Result<LibraryPlan, ArmError> {
+        library::plan_create_profile(&self.library_root, id, name, description, pack_ids)
+    }
+
+    pub fn create_profile(
+        &self,
+        id: &str,
+        name: &str,
+        description: &str,
+        pack_ids: &[String],
+    ) -> Result<LibraryMutationOutcome, ArmError> {
+        library::create_profile(
+            &self.library_root,
+            &self.state_root,
+            id,
+            name,
+            description,
+            pack_ids,
+        )
+    }
+
+    pub fn plan_activate_profile(&self, profile_id: &str) -> Result<LibraryPlan, ArmError> {
+        library::plan_activate_profile(&self.library_root, &self.state_root, profile_id)
+    }
+
+    pub fn activate_profile(
+        &self,
+        profile_id: &str,
+    ) -> Result<LibraryMutationOutcome, ArmError> {
+        library::activate_profile(&self.library_root, &self.state_root, profile_id)
+    }
+
+    pub fn rule_source_path(
+        &self,
+        pack_id: &str,
+        relative_path: &str,
+    ) -> Result<PathBuf, ArmError> {
+        library::rule_source_path(&self.library_root, pack_id, relative_path)
+    }
+
+    pub fn rollback_library_latest(&self) -> Result<RollbackOutcome, ArmError> {
+        library::rollback_library_latest(&self.state_root)
     }
 
     pub fn snapshot(&self) -> Result<WorkspaceSnapshot, ArmError> {
-        let source_path = self.source_path();
-        let source_exists = source_path.exists();
-        let (source_digest, source_modified_at) = if source_exists {
-            let source_content = fs::read_to_string(&source_path)
-                .map_err(|error| ArmError::io(source_path.display().to_string(), error))?;
-            let modified_at = fs::metadata(&source_path)
-                .and_then(|metadata| metadata.modified())
-                .ok()
-                .map(DateTime::<Utc>::from)
-                .map(|timestamp| timestamp.to_rfc3339());
-            (Some(short_digest(&source_content)), modified_at)
-        } else {
-            (None, None)
-        };
+        let library = library::inspect(&self.library_root, &self.state_root)?;
+        let source_path = library.source_path.clone();
+        let legacy_source = library.legacy_adapter_source_path.as_deref();
         let agents = self
             .adapters
             .iter()
-            .map(|adapter| self.inspect_adapter(adapter, &source_path))
+            .map(|adapter| self.inspect_adapter(adapter, &source_path, legacy_source))
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(WorkspaceSnapshot {
             library_root: self.library_root.display().to_string(),
+            library_state: library.state,
+            library_detail: library.detail,
+            runtime_state: library.runtime_state,
             source_path: source_path.display().to_string(),
-            source_exists,
-            source_digest,
-            source_modified_at,
+            source_exists: library.source_exists,
+            source_digest: library.source_digest,
+            source_modified_at: library.source_modified_at,
+            active_profile_id: library.active_profile_id,
+            active_source_path: library
+                .active_source_path
+                .map(|path| path.display().to_string()),
+            legacy_source_path: library
+                .legacy_source_path
+                .map(|path| path.display().to_string()),
+            packs: library.packs,
+            profiles: library.profiles,
             latest_backup: self.latest_backup_path()?.and_then(|path| {
                 path.file_stem()
                     .map(|value| value.to_string_lossy().to_string())
             }),
+            latest_library_backup: library::latest_library_backup_id(&self.state_root)?,
             agents,
         })
     }
@@ -165,6 +241,8 @@ impl RulesManager {
         if !source_path.exists() {
             return Err(ArmError::MissingSource(source_path.display().to_string()));
         }
+        let library = library::inspect(&self.library_root, &self.state_root)?;
+        let legacy_source = library.legacy_adapter_source_path.as_deref();
         let requested = self.resolve_connection_changes(changes)?;
         let mut blocked = false;
         let mut change_count = 0;
@@ -175,17 +253,24 @@ impl RulesManager {
             .iter()
             .filter(|adapter| requested.contains_key(&adapter.id))
         {
-            let status = self.inspect_adapter(adapter, &source_path)?;
+            let status = self.inspect_adapter(adapter, &source_path, legacy_source)?;
             let desired_connected = requested[&adapter.id];
             let (action, summary) = match (desired_connected, status.target_kind) {
                 (true, TargetKind::ConnectedLink) => {
-                    ("none", "Already links to the canonical rules.")
+                    ("none", "Already links to the stable current rules entrypoint.")
                 }
                 (true, TargetKind::Missing) => {
                     change_count += 1;
                     (
                         "createLink",
-                        "Create a symbolic link to the canonical rules file.",
+                        "Create a symbolic link to current/AGENTS.md.",
+                    )
+                }
+                (true, TargetKind::LegacyLink) => {
+                    change_count += 1;
+                    (
+                        "replaceLegacyLink",
+                        "Move the managed legacy link to current/AGENTS.md.",
                     )
                 }
                 (true, TargetKind::LegacyInclude) => {
@@ -223,6 +308,13 @@ impl RulesManager {
                     (
                         "createIndependentFile",
                         "Replace the managed link with an independent copy of the current canonical rules.",
+                    )
+                }
+                (false, TargetKind::LegacyLink) => {
+                    change_count += 1;
+                    (
+                        "createIndependentFile",
+                        "Replace the legacy link with an independent copy of the current rules.",
                     )
                 }
                 (false, TargetKind::LegacyInclude) => {
@@ -270,8 +362,14 @@ impl RulesManager {
         changes: &[ConnectionChange],
     ) -> Result<ApplyOutcome, ArmError> {
         let source = self.source_path();
-        let source = fs::canonicalize(&source)
+        let metadata = fs::metadata(&source)
             .map_err(|error| ArmError::io(source.display().to_string(), error))?;
+        if !metadata.is_file() {
+            return Err(ArmError::MissingSource(source.display().to_string()));
+        }
+        let source = absolute_logical_path(&source)?;
+        let library = library::inspect(&self.library_root, &self.state_root)?;
+        let legacy_source = library.legacy_adapter_source_path.as_deref();
         let plan = self.plan_connections(changes)?;
         if plan.blocked {
             let targets = plan
@@ -306,7 +404,13 @@ impl RulesManager {
                 .iter()
                 .find(|adapter| adapter.id == step.agent_id)
                 .ok_or_else(|| ArmError::UnknownAgent(step.agent_id.clone()))?;
-            let desired = desired_connection_state(adapter, &source, &original, &step.action)?;
+            let desired = desired_connection_state(
+                adapter,
+                &source,
+                legacy_source,
+                &original,
+                &step.action,
+            )?;
             prepared.push(PreparedChange {
                 agent_id: step.agent_id.clone(),
                 path,
@@ -440,8 +544,10 @@ impl RulesManager {
         &self,
         adapter: &AgentAdapter,
         source_path: &Path,
+        legacy_source: Option<&Path>,
     ) -> Result<AgentStatus, ArmError> {
-        let inspection = inspect_projection_target(&adapter.target_path, source_path)?;
+        let inspection =
+            inspect_projection_target(&adapter.target_path, source_path, legacy_source)?;
         let (installed, detection_detail) = detect_adapter(adapter);
         Ok(AgentStatus {
             id: adapter.id.clone(),
@@ -535,6 +641,62 @@ fn home_dir() -> Result<PathBuf, ArmError> {
         .ok_or_else(|| ArmError::MissingSource("HOME is not set".into()))
 }
 
+fn absolute_logical_path(path: &Path) -> Result<PathBuf, ArmError> {
+    if path.is_absolute() {
+        return Ok(path.to_path_buf());
+    }
+    let current = env::current_dir()
+        .map_err(|error| ArmError::io(path.display().to_string(), error))?;
+    Ok(current.join(path))
+}
+
+#[cfg(test)]
+fn paths_resolve_equal(left: &Path, right: &Path) -> bool {
+    let left = fs::canonicalize(left).unwrap_or_else(|_| left.to_path_buf());
+    let right = fs::canonicalize(right).unwrap_or_else(|_| right.to_path_buf());
+    left == right
+}
+
+fn normalize_logical_path(path: &Path) -> PathBuf {
+    let mut normalized = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                normalized.pop();
+            }
+            other => normalized.push(other.as_os_str()),
+        }
+    }
+    normalized
+}
+
+fn logical_paths_equal(left: &Path, right: &Path) -> bool {
+    let make_absolute = |path: &Path| {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            env::current_dir()
+                .map(|current| current.join(path))
+                .unwrap_or_else(|_| path.to_path_buf())
+        }
+    };
+    normalize_logical_path(&make_absolute(left)) == normalize_logical_path(&make_absolute(right))
+}
+
+fn symlink_state_points_to(target_path: &Path, linked: &str, expected: &Path) -> bool {
+    let linked = PathBuf::from(linked);
+    let linked = if linked.is_absolute() {
+        linked
+    } else {
+        target_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(linked)
+    };
+    logical_paths_equal(&linked, expected)
+}
+
 fn detect_adapter(adapter: &AgentAdapter) -> (bool, String) {
     if let Some(path) = adapter
         .detection_paths
@@ -587,6 +749,7 @@ fn find_command(command: &str) -> Option<PathBuf> {
 fn inspect_projection_target(
     target: &Path,
     source: &Path,
+    legacy_source: Option<&Path>,
 ) -> Result<TargetInspection, ArmError> {
     match read_file_state(target)? {
         FileState::Missing => Ok(TargetInspection {
@@ -604,6 +767,17 @@ fn inspect_projection_target(
                     connected: true,
                     mode: DeployMode::Symlink,
                     detail: "Linked directly to the canonical rules.".into(),
+                })
+            } else if legacy_source
+                .is_some_and(|legacy| link_points_to_source(target, Path::new(&linked), legacy))
+            {
+                Ok(TargetInspection {
+                    state: TargetState::Drifted,
+                    kind: TargetKind::LegacyLink,
+                    connected: true,
+                    mode: DeployMode::Symlink,
+                    detail: "The managed link still points to the migrated root AGENTS.md."
+                        .into(),
                 })
             } else {
                 Ok(TargetInspection {
@@ -659,9 +833,7 @@ fn link_points_to_source(target: &Path, linked: &Path, source: &Path) -> bool {
             .unwrap_or_else(|| Path::new("."))
             .join(linked)
     };
-    let source = fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
-    let linked = fs::canonicalize(&linked).unwrap_or(linked);
-    linked == source
+    logical_paths_equal(&linked, source)
 }
 
 fn managed_include_span(content: &str) -> Result<Option<(usize, usize)>, ()> {
@@ -740,6 +912,7 @@ fn restore_prepared_changes(changes: &[PreparedChange]) -> bool {
 fn desired_connection_state(
     adapter: &AgentAdapter,
     source: &Path,
+    legacy_source: Option<&Path>,
     current: &FileState,
     action: &str,
 ) -> Result<FileState, ArmError> {
@@ -747,6 +920,23 @@ fn desired_connection_state(
         "createLink" if matches!(current, FileState::Missing) => Ok(FileState::Symlink {
             target: source.display().to_string(),
         }),
+        "replaceLegacyLink" => {
+            let FileState::Symlink { target } = current else {
+                return Err(ArmError::ApplyDrift(
+                    adapter.target_path.display().to_string(),
+                ));
+            };
+            if !legacy_source.is_some_and(|legacy| {
+                symlink_state_points_to(&adapter.target_path, target, legacy)
+            }) {
+                return Err(ArmError::ApplyDrift(
+                    adapter.target_path.display().to_string(),
+                ));
+            }
+            Ok(FileState::Symlink {
+                target: source.display().to_string(),
+            })
+        }
         "migrateLegacyInclude" if legacy_include_is_only_managed_content(current) => {
             Ok(FileState::Symlink {
                 target: source.display().to_string(),
@@ -758,7 +948,12 @@ fn desired_connection_state(
                     adapter.target_path.display().to_string(),
                 ));
             };
-            if !link_points_to_source(&adapter.target_path, Path::new(linked), source) {
+            let points_to_current =
+                link_points_to_source(&adapter.target_path, Path::new(linked), source);
+            let points_to_legacy = legacy_source.is_some_and(|legacy| {
+                link_points_to_source(&adapter.target_path, Path::new(linked), legacy)
+            });
+            if !points_to_current && !points_to_legacy {
                 return Err(ArmError::ApplyDrift(
                     adapter.target_path.display().to_string(),
                 ));
@@ -869,11 +1064,6 @@ fn create_symlink(source: &Path, target: &Path) -> Result<(), ArmError> {
         .map_err(|error| ArmError::io(target.display().to_string(), error))
 }
 
-fn short_digest(content: &str) -> String {
-    let digest = Sha256::digest(content.as_bytes());
-    format!("{digest:x}")[..12].to_string()
-}
-
 fn file_state_digest(state: &FileState) -> Result<String, ArmError> {
     let bytes = serde_json::to_vec(state)?;
     let digest = Sha256::digest(bytes);
@@ -942,6 +1132,47 @@ mod tests {
         assert!(!home.join(".grok/AGENTS.md").exists());
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn migrated_legacy_connections_can_move_to_current_after_root_removal() {
+        let (_root, manager, home) = fixture();
+        let library = home.join(".agent-rules");
+        fs::create_dir_all(&library).expect("library");
+        let legacy = library.join("AGENTS.md");
+        fs::write(&legacy, "# Existing rules\n").expect("legacy rules");
+
+        let codex = home.join(".codex/AGENTS.md");
+        fs::create_dir_all(codex.parent().unwrap()).expect("codex dir");
+        std::os::unix::fs::symlink(&legacy, &codex).expect("legacy codex link");
+        let claude = home.join(".claude/CLAUDE.md");
+        fs::create_dir_all(claude.parent().unwrap()).expect("claude dir");
+        fs::write(&claude, format!("{}\n", include_block(&legacy))).expect("legacy include");
+
+        manager.initialize().expect("import");
+        assert!(!legacy.exists());
+        assert_eq!(
+            fs::read_to_string(library.join("packs/base/AGENTS.md")).unwrap(),
+            "# Existing rules\n"
+        );
+        let snapshot = manager.snapshot().expect("snapshot");
+        assert!(snapshot
+            .agents
+            .iter()
+            .filter(|agent| agent.id == "codex" || agent.id == "claude")
+            .all(|agent| agent.state == TargetState::Drifted));
+
+        manager
+            .apply(&["codex".into(), "claude".into()])
+            .expect("move connections");
+        assert!(!legacy.exists());
+        assert!(paths_resolve_equal(
+            &home.join(".codex/AGENTS.md"),
+            &manager.source_path()
+        ));
+        assert!(claude.is_symlink());
+        assert!(paths_resolve_equal(&claude, &manager.source_path()));
+    }
+
     #[test]
     fn rollback_refuses_post_apply_drift() {
         let (_root, manager, home) = fixture();
@@ -961,7 +1192,8 @@ mod tests {
     #[test]
     fn disconnect_materializes_an_independent_file_and_rollback_restores_the_link() {
         let (_root, manager, home) = fixture();
-        let source = manager.initialize().expect("initialize");
+        manager.initialize().expect("initialize");
+        let source = manager.source_path();
         manager.apply(&["qwen".into()]).expect("connect qwen");
         let qwen = home.join(".qwen/QWEN.md");
         assert!(qwen.is_symlink());
@@ -987,7 +1219,8 @@ mod tests {
     #[test]
     fn legacy_include_can_be_detached_without_losing_surrounding_rules() {
         let (_root, manager, home) = fixture();
-        let source = manager.initialize().expect("initialize");
+        manager.initialize().expect("initialize");
+        let source = manager.source_path();
         let claude = home.join(".claude/CLAUDE.md");
         fs::create_dir_all(claude.parent().unwrap()).expect("claude dir");
         fs::write(
@@ -1030,11 +1263,11 @@ mod tests {
         let root = TempDir::new().expect("temp root");
         let home = root.path().join("home");
         let library = home.join(".agent-rules");
-        let invalid_state_root = home.join("state-file");
+        let state_root = home.join("state");
         fs::create_dir_all(&home).expect("home");
-        fs::write(&invalid_state_root, "not a directory").expect("state file");
-        let manager = RulesManager::new(library, invalid_state_root, &home);
+        let manager = RulesManager::new(library, state_root.clone(), &home);
         manager.initialize().expect("initialize");
+        fs::write(state_root.join("backups"), "not a directory").expect("backup blocker");
 
         assert!(manager.apply(&["codex".into()]).is_err());
         assert!(!home.join(".codex/AGENTS.md").exists());
@@ -1082,7 +1315,7 @@ mod tests {
         manager.initialize().expect("initialize");
         let claude = home.join(".claude/CLAUDE.md");
         fs::create_dir_all(claude.parent().unwrap()).expect("claude dir");
-        std::os::unix::fs::symlink("../.agent-rules/AGENTS.md", &claude)
+        std::os::unix::fs::symlink("../.agent-rules/current/AGENTS.md", &claude)
             .expect("relative source link");
 
         let snapshot = manager.snapshot().expect("snapshot");
@@ -1092,5 +1325,29 @@ mod tests {
             .find(|agent| agent.id == "claude")
             .expect("claude status");
         assert_eq!(status.state, TargetState::InSync);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn direct_runtime_link_is_not_treated_as_the_stable_current_entrypoint() {
+        let (_root, manager, home) = fixture();
+        manager.initialize().expect("initialize");
+        let current = home.join(".agent-rules/current");
+        let runtime = home
+            .join(".agent-rules")
+            .join(fs::read_link(&current).expect("current target"))
+            .join("AGENTS.md");
+        let codex = home.join(".codex/AGENTS.md");
+        fs::create_dir_all(codex.parent().unwrap()).expect("codex dir");
+        std::os::unix::fs::symlink(runtime, &codex).expect("direct runtime link");
+
+        let snapshot = manager.snapshot().expect("snapshot");
+        let status = snapshot
+            .agents
+            .iter()
+            .find(|agent| agent.id == "codex")
+            .expect("codex status");
+        assert_eq!(status.state, TargetState::Conflict);
+        assert_eq!(status.target_kind, TargetKind::ForeignLink);
     }
 }

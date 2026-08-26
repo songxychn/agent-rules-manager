@@ -56,7 +56,7 @@ pub fn list_open_targets() -> Vec<OpenTarget> {
 }
 
 pub fn open_source(app: &AppHandle, target_id: &str, source: &Path) -> Result<(), String> {
-    let metadata = fs::metadata(source)
+    let metadata = fs::symlink_metadata(source)
         .map_err(|error| format!("cannot open {}: {error}", source.display()))?;
     if !metadata.is_file() {
         return Err(format!("rules source is not a regular file: {}", source.display()));
