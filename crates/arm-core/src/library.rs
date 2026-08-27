@@ -216,6 +216,13 @@ struct PreparedMigration {
     loaded: LoadedLibrary,
 }
 
+#[derive(Debug, Clone)]
+struct PreparedProfileDeletion {
+    changes: Vec<PreparedChange>,
+    directories: Vec<PathBuf>,
+    steps: Vec<LibraryPlanStep>,
+}
+
 pub(crate) fn source_path(library_root: &Path) -> PathBuf {
     library_root.join(CURRENT_LINK).join(ENTRYPOINT_FILE)
 }
@@ -1072,6 +1079,199 @@ pub(crate) fn add_profile_file(
     )
 }
 
+pub(crate) fn plan_remove_profile_file(
+    library_root: &Path,
+    profile_id: &str,
+    relative_path: &str,
+) -> Result<LibraryPlan, ArmError> {
+    validate_id(profile_id)?;
+    validate_instruction_path(relative_path)?;
+    let loaded = load_library(library_root)?;
+    let profile = loaded
+        .profiles
+        .get(profile_id)
+        .ok_or_else(|| ArmError::UnknownProfile(profile_id.into()))?;
+    let declared = profile
+        .document
+        .instructions
+        .iter()
+        .any(|path| path == relative_path);
+    let required_entrypoint = relative_path == ENTRYPOINT_FILE;
+    let blocked = required_entrypoint || !declared;
+    let file_path = library_root
+        .join(PROFILES_DIR)
+        .join(profile_id)
+        .join(relative_path);
+    let steps = if blocked {
+        Vec::new()
+    } else {
+        vec![
+            plan_step(
+                library_root
+                    .join(PROFILES_DIR)
+                    .join(profile_id)
+                    .join(PROFILE_MANIFEST_FILE),
+                "updateProfile",
+                "Remove the Markdown path from the ordered instruction manifest.",
+            ),
+            plan_step(
+                file_path,
+                "deleteRuleFile",
+                "Delete the declared Markdown source after snapshotting its exact contents.",
+            ),
+        ]
+    };
+    Ok(LibraryPlan {
+        operation: "removeProfileFile".into(),
+        blocked,
+        change_count: steps.len(),
+        summary: if required_entrypoint {
+            format!(
+                "`{ENTRYPOINT_FILE}` is the required first source in Profile `{profile_id}` and cannot be removed."
+            )
+        } else if !declared {
+            format!(
+                "`{relative_path}` is not declared by Profile `{profile_id}`; no file will be deleted."
+            )
+        } else {
+            format!(
+                "Remove `{relative_path}` from Profile `{profile_id}` and delete its declared Markdown source with rollback protection."
+            )
+        },
+        steps,
+    })
+}
+
+pub(crate) fn remove_profile_file(
+    library_root: &Path,
+    state_root: &Path,
+    profile_id: &str,
+    relative_path: &str,
+) -> Result<LibraryMutationOutcome, ArmError> {
+    let plan = plan_remove_profile_file(library_root, profile_id, relative_path)?;
+    if plan.blocked {
+        return Err(ArmError::Blocked(plan.summary));
+    }
+    let manifest_path = library_root
+        .join(PROFILES_DIR)
+        .join(profile_id)
+        .join(PROFILE_MANIFEST_FILE);
+    let manifest_original = read_file_state(&manifest_path)?;
+    let mut document: ProfileDocument = match &manifest_original {
+        FileState::File { content } => serde_json::from_str(content)?,
+        _ => return Err(ArmError::ApplyDrift(manifest_path.display().to_string())),
+    };
+    validate_profile_document(&document, profile_id)?;
+    let position = document
+        .instructions
+        .iter()
+        .position(|path| path == relative_path)
+        .ok_or_else(|| ArmError::ApplyDrift(manifest_path.display().to_string()))?;
+    if position == 0 || relative_path == ENTRYPOINT_FILE {
+        return Err(ArmError::ApplyDrift(manifest_path.display().to_string()));
+    }
+    document.instructions.remove(position);
+    let file_path = library_root
+        .join(PROFILES_DIR)
+        .join(profile_id)
+        .join(relative_path);
+    let file_original = read_file_state(&file_path)?;
+    if !matches!(file_original, FileState::File { .. }) {
+        return Err(ArmError::ApplyDrift(file_path.display().to_string()));
+    }
+    apply_changes(
+        state_root,
+        "removeProfileFile",
+        vec![
+            PreparedChange {
+                path: manifest_path,
+                original: manifest_original,
+                desired: FileState::File {
+                    content: pretty_json(&document)? + "\n",
+                },
+            },
+            PreparedChange {
+                path: file_path,
+                original: file_original,
+                desired: FileState::Missing,
+            },
+        ],
+    )
+}
+
+pub(crate) fn plan_delete_profile(
+    library_root: &Path,
+    state_root: &Path,
+    profile_id: &str,
+) -> Result<LibraryPlan, ArmError> {
+    validate_id(profile_id)?;
+    let loaded = load_library(library_root)?;
+    let profile = loaded
+        .profiles
+        .get(profile_id)
+        .ok_or_else(|| ArmError::UnknownProfile(profile_id.into()))?;
+    let directory = library_root.join(PROFILES_DIR).join(profile_id);
+    if let Some(summary) = profile_deletion_blocker(&directory, state_root, profile)? {
+        return Ok(LibraryPlan {
+            operation: "deleteProfile".into(),
+            blocked: true,
+            change_count: 0,
+            summary,
+            steps: Vec::new(),
+        });
+    }
+    let prepared = prepare_profile_deletion(&directory, profile)?;
+    Ok(LibraryPlan {
+        operation: "deleteProfile".into(),
+        blocked: false,
+        change_count: prepared.steps.len(),
+        summary: format!(
+            "Delete inactive Profile `{profile_id}` and its {} declared Markdown source(s) after creating a rollback snapshot.",
+            profile.files.len()
+        ),
+        steps: prepared.steps,
+    })
+}
+
+pub(crate) fn delete_profile(
+    library_root: &Path,
+    state_root: &Path,
+    profile_id: &str,
+) -> Result<LibraryMutationOutcome, ArmError> {
+    let plan = plan_delete_profile(library_root, state_root, profile_id)?;
+    if plan.blocked {
+        return Err(ArmError::Blocked(plan.summary));
+    }
+    let loaded = load_library(library_root)?;
+    let profile = loaded
+        .profiles
+        .get(profile_id)
+        .ok_or_else(|| ArmError::UnknownProfile(profile_id.into()))?;
+    let directory = library_root.join(PROFILES_DIR).join(profile_id);
+    if let Some(summary) = profile_deletion_blocker(&directory, state_root, profile)? {
+        return Err(ArmError::Blocked(summary));
+    }
+    let prepared = prepare_profile_deletion(&directory, profile)?;
+    let mut outcome = apply_changes(state_root, "deleteProfile", prepared.changes)?;
+    let backup_id = outcome
+        .backup_id
+        .as_deref()
+        .ok_or_else(|| ArmError::ApplyDrift(directory.display().to_string()))?;
+    match remove_profile_directories(&prepared.directories) {
+        Ok(removed) => {
+            outcome.changed.extend(removed);
+            Ok(outcome)
+        }
+        Err(error) => {
+            let backup_path = library_backup_path(state_root, backup_id);
+            match rollback_library_backup(state_root, &backup_path) {
+                Ok(_) => Err(error),
+                Err(rollback_error) => Err(rollback_error),
+            }
+        }
+    }
+}
+
 pub(crate) fn plan_activate_profile(
     library_root: &Path,
     state_root: &Path,
@@ -1244,6 +1444,13 @@ pub(crate) fn latest_library_backup_id(state_root: &Path) -> Result<Option<Strin
 
 pub(crate) fn rollback_library_latest(state_root: &Path) -> Result<RollbackOutcome, ArmError> {
     let backup_path = latest_backup_path(state_root)?.ok_or(ArmError::NoBackup)?;
+    rollback_library_backup(state_root, &backup_path)
+}
+
+fn rollback_library_backup(
+    state_root: &Path,
+    backup_path: &Path,
+) -> Result<RollbackOutcome, ArmError> {
     let data = fs::read_to_string(&backup_path)
         .map_err(|error| ArmError::io(backup_path.display().to_string(), error))?;
     let backup: BackupSnapshot = serde_json::from_str(&data)?;
@@ -1633,6 +1840,184 @@ fn validate_profile_document(
         }
     }
     Ok(())
+}
+
+fn profile_deletion_blocker(
+    directory: &Path,
+    state_root: &Path,
+    profile: &LoadedProfile,
+) -> Result<Option<String>, ArmError> {
+    if read_machine(state_root)?
+        .as_ref()
+        .is_some_and(|machine| machine.active_profile_id == profile.document.id)
+    {
+        return Ok(Some(format!(
+            "Profile `{}` is active on this machine; switch to another Profile before deleting it.",
+            profile.document.id
+        )));
+    }
+    let (declared_files, declared_directories) = profile_declared_entries(profile);
+    if let Some(relative) =
+        first_unmanaged_profile_entry(directory, directory, &declared_files, &declared_directories)?
+    {
+        return Ok(Some(format!(
+            "Profile `{}` contains unmanaged entry `{relative}`; deletion will not touch it.",
+            profile.document.id
+        )));
+    }
+    Ok(None)
+}
+
+fn profile_declared_entries(profile: &LoadedProfile) -> (BTreeSet<String>, BTreeSet<String>) {
+    let declared_files = std::iter::once(PROFILE_MANIFEST_FILE.to_string())
+        .chain(profile.document.instructions.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    let mut declared_directories = BTreeSet::new();
+    for relative in &profile.document.instructions {
+        let mut parent = Path::new(relative).parent();
+        while let Some(directory) = parent {
+            if directory.as_os_str().is_empty() {
+                break;
+            }
+            declared_directories.insert(directory.to_string_lossy().replace('\\', "/"));
+            parent = directory.parent();
+        }
+    }
+    (declared_files, declared_directories)
+}
+
+fn first_unmanaged_profile_entry(
+    root: &Path,
+    directory: &Path,
+    declared_files: &BTreeSet<String>,
+    declared_directories: &BTreeSet<String>,
+) -> Result<Option<String>, ArmError> {
+    for path in sorted_entries(directory)? {
+        let metadata = fs::symlink_metadata(&path)
+            .map_err(|error| ArmError::io(path.display().to_string(), error))?;
+        let relative = path
+            .strip_prefix(root)
+            .map_err(|_| ArmError::InvalidLibrary(path.display().to_string()))?
+            .to_string_lossy()
+            .replace('\\', "/");
+        if metadata.is_dir() {
+            if !declared_directories.contains(&relative) {
+                return Ok(Some(relative));
+            }
+            if let Some(unmanaged) =
+                first_unmanaged_profile_entry(root, &path, declared_files, declared_directories)?
+            {
+                return Ok(Some(unmanaged));
+            }
+        } else if !metadata.is_file() || !declared_files.contains(&relative) {
+            return Ok(Some(relative));
+        }
+    }
+    Ok(None)
+}
+
+fn prepare_profile_deletion(
+    directory: &Path,
+    profile: &LoadedProfile,
+) -> Result<PreparedProfileDeletion, ArmError> {
+    let mut changes = Vec::new();
+    let mut steps = Vec::new();
+    for file in &profile.files {
+        let original = read_file_state(&file.path)?;
+        if !matches!(original, FileState::File { .. }) {
+            return Err(ArmError::ApplyDrift(file.path.display().to_string()));
+        }
+        changes.push(PreparedChange {
+            path: file.path.clone(),
+            original,
+            desired: FileState::Missing,
+        });
+        steps.push(plan_step(
+            file.path.clone(),
+            "deleteProfileSource",
+            "Delete this declared Markdown source after snapshotting its exact contents.",
+        ));
+    }
+    let manifest_path = directory.join(PROFILE_MANIFEST_FILE);
+    let manifest_original = read_file_state(&manifest_path)?;
+    if !matches!(manifest_original, FileState::File { .. }) {
+        return Err(ArmError::ApplyDrift(manifest_path.display().to_string()));
+    }
+    changes.push(PreparedChange {
+        path: manifest_path.clone(),
+        original: manifest_original,
+        desired: FileState::Missing,
+    });
+    steps.push(plan_step(
+        manifest_path,
+        "deleteProfileManifest",
+        "Delete the Profile manifest after every declared source is snapshotted.",
+    ));
+
+    let (_, declared_directories) = profile_declared_entries(profile);
+    let mut directories = declared_directories
+        .into_iter()
+        .map(|relative| directory.join(relative))
+        .collect::<Vec<_>>();
+    directories.push(directory.to_path_buf());
+    directories.sort_by(|left, right| {
+        right
+            .components()
+            .count()
+            .cmp(&left.components().count())
+            .then_with(|| right.cmp(left))
+    });
+    for path in &directories {
+        steps.push(plan_step(
+            path.clone(),
+            "deleteProfileDirectory",
+            if path == directory {
+                "Remove the empty Profile directory."
+            } else {
+                "Remove this empty Profile source directory."
+            },
+        ));
+    }
+    Ok(PreparedProfileDeletion {
+        changes,
+        directories,
+        steps,
+    })
+}
+
+fn remove_profile_directories(directories: &[PathBuf]) -> Result<Vec<String>, ArmError> {
+    let mut removed = Vec::new();
+    for directory in directories {
+        let metadata = match fs::symlink_metadata(directory) {
+            Ok(metadata) => metadata,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return Err(ArmError::ApplyDrift(directory.display().to_string()))
+            }
+            Err(error) => return Err(ArmError::io(directory.display().to_string(), error)),
+        };
+        if !metadata.is_dir() {
+            return Err(ArmError::ApplyDrift(directory.display().to_string()));
+        }
+        let mut entries = fs::read_dir(directory)
+            .map_err(|error| ArmError::io(directory.display().to_string(), error))?;
+        if entries.next().is_some() {
+            return Err(ArmError::ApplyDrift(directory.display().to_string()));
+        }
+        match fs::remove_dir(directory) {
+            Ok(()) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::NotFound | std::io::ErrorKind::DirectoryNotEmpty
+                ) =>
+            {
+                return Err(ArmError::ApplyDrift(directory.display().to_string()))
+            }
+            Err(error) => return Err(ArmError::io(directory.display().to_string(), error)),
+        }
+        removed.push(directory.display().to_string());
+    }
+    Ok(removed)
 }
 
 fn validate_legacy_pack_document(
@@ -2113,9 +2498,15 @@ fn write_backup(state_root: &Path, backup: &BackupSnapshot) -> Result<PathBuf, A
     let directory = state_root.join("library-backups");
     fs::create_dir_all(&directory)
         .map_err(|error| ArmError::io(directory.display().to_string(), error))?;
-    let path = directory.join(format!("{}.json", backup.id));
+    let path = library_backup_path(state_root, &backup.id);
     write_atomic(&path, &(pretty_json(backup)? + "\n"))?;
     Ok(path)
+}
+
+fn library_backup_path(state_root: &Path, backup_id: &str) -> PathBuf {
+    state_root
+        .join("library-backups")
+        .join(format!("{backup_id}.json"))
 }
 
 fn latest_backup_path(state_root: &Path) -> Result<Option<PathBuf>, ArmError> {
@@ -2596,6 +2987,200 @@ mod tests {
         rollback_library_latest(&state).expect("rollback");
         assert_eq!(fs::read_to_string(&manifest).unwrap(), original);
         assert!(!library.join("profiles/default/rules/testing.md").exists());
+    }
+
+    #[test]
+    fn supplemental_file_removal_updates_manifest_and_rolls_back_exact_content() {
+        let (_temporary, library, state) = fixture();
+        initialize(&library, &state).expect("initialize");
+        add_profile_file(&library, &state, "default", "rules/testing.md").expect("add file");
+        let source = library.join("profiles/default/rules/testing.md");
+        fs::write(&source, "# Testing\n\nKeep this exact content.\n").expect("edit source");
+        activate_profile(&library, &state, "default").expect("refresh runtime");
+
+        let plan = plan_remove_profile_file(&library, "default", "rules/testing.md").expect("plan");
+        assert!(!plan.blocked);
+        assert_eq!(plan.operation, "removeProfileFile");
+        assert_eq!(plan.change_count, 2);
+        assert_eq!(plan.steps[0].action, "updateProfile");
+        assert_eq!(plan.steps[1].action, "deleteRuleFile");
+
+        remove_profile_file(&library, &state, "default", "rules/testing.md").expect("remove file");
+        assert!(!source.exists());
+        assert!(
+            !fs::read_to_string(library.join("profiles/default/profile.json"))
+                .unwrap()
+                .contains("rules/testing.md")
+        );
+        assert_eq!(
+            inspect(&library, &state).expect("inspect").runtime_state,
+            RuntimeState::Stale
+        );
+
+        rollback_library_latest(&state).expect("rollback removal");
+        assert_eq!(
+            fs::read_to_string(&source).unwrap(),
+            "# Testing\n\nKeep this exact content.\n"
+        );
+        assert!(
+            fs::read_to_string(library.join("profiles/default/profile.json"))
+                .unwrap()
+                .contains("rules/testing.md")
+        );
+        assert_eq!(
+            inspect(&library, &state)
+                .expect("inspect restored")
+                .runtime_state,
+            RuntimeState::Current
+        );
+    }
+
+    #[test]
+    fn profile_file_removal_blocks_required_and_undeclared_sources() {
+        let (_temporary, library, state) = fixture();
+        initialize(&library, &state).expect("initialize");
+
+        let required =
+            plan_remove_profile_file(&library, "default", ENTRYPOINT_FILE).expect("required plan");
+        assert!(required.blocked);
+        assert!(required.summary.contains("required first source"));
+        assert!(matches!(
+            remove_profile_file(&library, &state, "default", ENTRYPOINT_FILE),
+            Err(ArmError::Blocked(_))
+        ));
+
+        let undeclared = plan_remove_profile_file(&library, "default", "rules/unknown.md")
+            .expect("undeclared plan");
+        assert!(undeclared.blocked);
+        assert!(undeclared.summary.contains("is not declared"));
+        assert!(matches!(
+            remove_profile_file(&library, &state, "default", "rules/unknown.md"),
+            Err(ArmError::Blocked(_))
+        ));
+        assert!(library.join("profiles/default/AGENTS.md").is_file());
+    }
+
+    #[test]
+    fn profile_file_removal_rollback_refuses_recreated_source_drift() {
+        let (_temporary, library, state) = fixture();
+        initialize(&library, &state).expect("initialize");
+        add_profile_file(&library, &state, "default", "rules/testing.md").expect("add file");
+        remove_profile_file(&library, &state, "default", "rules/testing.md").expect("remove file");
+        let source = library.join("profiles/default/rules/testing.md");
+        fs::write(&source, "# Replacement\n").expect("recreate source");
+
+        assert!(matches!(
+            rollback_library_latest(&state),
+            Err(ArmError::RollbackDrift(_))
+        ));
+        assert_eq!(fs::read_to_string(source).unwrap(), "# Replacement\n");
+    }
+
+    #[test]
+    fn inactive_profile_delete_removes_owned_tree_and_rolls_back() {
+        let (_temporary, library, state) = fixture();
+        initialize(&library, &state).expect("initialize");
+        create_profile(&library, &state, "work", "Work", "Work rules").expect("profile");
+        add_profile_file(&library, &state, "work", "rules/testing.md").expect("add file");
+        fs::write(library.join("profiles/work/AGENTS.md"), "# Work\n").expect("work rules");
+        fs::write(
+            library.join("profiles/work/rules/testing.md"),
+            "# Testing\n",
+        )
+        .expect("testing rules");
+
+        let plan = plan_delete_profile(&library, &state, "work").expect("delete plan");
+        assert!(!plan.blocked);
+        assert_eq!(plan.operation, "deleteProfile");
+        assert_eq!(plan.change_count, 5);
+        assert_eq!(
+            plan.steps
+                .iter()
+                .map(|step| step.action.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "deleteProfileSource",
+                "deleteProfileSource",
+                "deleteProfileManifest",
+                "deleteProfileDirectory",
+                "deleteProfileDirectory",
+            ]
+        );
+
+        let outcome = delete_profile(&library, &state, "work").expect("delete profile");
+        assert_eq!(outcome.changed.len(), 5);
+        assert!(!library.join("profiles/work").exists());
+        assert!(inspect(&library, &state)
+            .expect("inspect deleted")
+            .profiles
+            .iter()
+            .all(|profile| profile.id != "work"));
+
+        rollback_library_latest(&state).expect("rollback delete");
+        assert_eq!(
+            fs::read_to_string(library.join("profiles/work/AGENTS.md")).unwrap(),
+            "# Work\n"
+        );
+        assert_eq!(
+            fs::read_to_string(library.join("profiles/work/rules/testing.md")).unwrap(),
+            "# Testing\n"
+        );
+        assert!(inspect(&library, &state)
+            .expect("inspect restored")
+            .profiles
+            .iter()
+            .any(|profile| profile.id == "work"));
+    }
+
+    #[test]
+    fn profile_delete_blocks_active_selection_and_unmanaged_entries() {
+        let (_temporary, library, state) = fixture();
+        initialize(&library, &state).expect("initialize");
+
+        let active_plan = plan_delete_profile(&library, &state, "default").expect("active plan");
+        assert!(active_plan.blocked);
+        assert!(active_plan.summary.contains("active on this machine"));
+        assert!(matches!(
+            delete_profile(&library, &state, "default"),
+            Err(ArmError::Blocked(_))
+        ));
+        assert!(library.join("profiles/default/AGENTS.md").is_file());
+
+        create_profile(&library, &state, "work", "Work", "").expect("profile");
+        fs::write(library.join("profiles/work/notes.txt"), "keep me\n").expect("unmanaged");
+        let unmanaged_plan = plan_delete_profile(&library, &state, "work").expect("unmanaged plan");
+        assert!(unmanaged_plan.blocked);
+        assert!(unmanaged_plan
+            .summary
+            .contains("unmanaged entry `notes.txt`"));
+        assert!(matches!(
+            delete_profile(&library, &state, "work"),
+            Err(ArmError::Blocked(_))
+        ));
+        assert_eq!(
+            fs::read_to_string(library.join("profiles/work/notes.txt")).unwrap(),
+            "keep me\n"
+        );
+    }
+
+    #[test]
+    fn profile_delete_rollback_refuses_recreated_source_drift() {
+        let (_temporary, library, state) = fixture();
+        initialize(&library, &state).expect("initialize");
+        create_profile(&library, &state, "work", "Work", "").expect("profile");
+        delete_profile(&library, &state, "work").expect("delete profile");
+        fs::create_dir_all(library.join("profiles/work")).expect("recreated profile directory");
+        fs::write(library.join("profiles/work/AGENTS.md"), "# Replacement\n")
+            .expect("recreated source");
+
+        assert!(matches!(
+            rollback_library_latest(&state),
+            Err(ArmError::RollbackDrift(_))
+        ));
+        assert_eq!(
+            fs::read_to_string(library.join("profiles/work/AGENTS.md")).unwrap(),
+            "# Replacement\n"
+        );
     }
 
     #[test]

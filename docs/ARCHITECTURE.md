@@ -102,6 +102,8 @@ Library mutations and native projections use optimistic, fail-closed transaction
 
 Rollback accepts a target only when it still matches the expected applied state or exact original state. A third state is post-apply drift and blocks the complete rollback. It removes only directories recorded as absent before apply and still empty at rollback time; directories containing later user data remain untouched.
 
+Profile deletion applies the same contract in reverse: the Profile must be inactive, every directory entry must be declared and regular, and every source is snapshotted before removal. Empty owned directories are removed only after all file writes verify. A concurrent directory change triggers an immediate rollback of that exact deletion snapshot.
+
 ## v1 upgrade contract
 
 Schema v1 is treated as an import format, not an active public abstraction:
@@ -117,7 +119,7 @@ Schema v1 is treated as an import format, not an active public abstraction:
 
 The WebView may request only a source declared by a known Profile, identified by `(profile_id, relative_path)`, plus a fixed open-target id returned by the backend. The core revalidates membership and the Tauri layer verifies a regular file before invoking a platform adapter. The WebView never submits an executable or arbitrary absolute path.
 
-Browser mode uses representative in-memory data. Create, append, activate, and rollback actions mutate only that snapshot.
+Browser mode uses representative in-memory data. Create, append, remove a supplemental source, delete a Profile, activate, and rollback actions mutate only that snapshot.
 
 ## Multi-machine transport contract
 
@@ -133,7 +135,7 @@ It must exclude `.runtime/**`, `current`, all application state, native Agent pa
 ## Extension points
 
 - explicit Git fetch/pull/merge/push;
-- edit, rename, delete, and reorder Profile sources under the same transaction contract;
+- edit, rename, and reorder Profile sources under the same transaction contract;
 - configurable agent detection and target paths;
 - controlled import or archive for independent native rules;
 - typed resources beyond instruction Markdown;

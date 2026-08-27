@@ -1,5 +1,6 @@
 import type { AgentStatus, ProjectionPlan, RuntimeState } from "../lib/types";
 import { useI18n } from "../lib/i18n";
+import { ConfirmDialog } from "./ConfirmDialog";
 import { StatusPill } from "./StatusPill";
 
 interface ProjectionRailProps {
@@ -13,8 +14,9 @@ interface ProjectionRailProps {
   loading: boolean;
   applying: boolean;
   onToggle: (agentId: string, connected: boolean) => void;
-  onInspect: () => void;
+  onContinue: () => void;
   onApply: () => void;
+  onCancelConfirmation: () => void;
 }
 
 export function ProjectionRail({
@@ -28,8 +30,9 @@ export function ProjectionRail({
   loading,
   applying,
   onToggle,
-  onInspect,
+  onContinue,
   onApply,
+  onCancelConfirmation,
 }: ProjectionRailProps) {
   const { t } = useI18n();
   const detectedAgents = agents.filter((agent) => agent.installed || agent.connected);
@@ -122,7 +125,7 @@ export function ProjectionRail({
               desiredConnected !== agent.connected ||
               (desiredConnected && agent.state === "drifted");
             const step = plan?.steps.find((candidate) => candidate.agentId === agent.id);
-            const previewedAction = step && step.action !== "none";
+            const plannedAction = step && step.action !== "none";
             const connectionLabel = !available
               ? t("projection.notDetected")
               : desiredConnected
@@ -157,8 +160,8 @@ export function ProjectionRail({
                     <code title={agent.targetPath}>{agent.targetPath}</code>
                     <small className="agent-mode">{connectionLabel}</small>
                     {available && <small className="agent-detail">{targetDetail(agent)}</small>}
-                    {previewedAction && (
-                      <small className={`agent-action-preview action-${step.action}`}>
+                    {plannedAction && (
+                      <small className={`agent-action-change action-${step.action}`}>
                         {stepSummary(step.action)}
                       </small>
                     )}
@@ -195,35 +198,57 @@ export function ProjectionRail({
           <strong>{statusTitle}</strong>
           <span>{statusBody}</span>
         </span>
-        {pendingCount > 0 && (
+        {pendingCount > 0 && !plan && (
           <span className="projection-status-actions">
             <button
               className="button button-secondary button-small"
-              onClick={onInspect}
+              onClick={onContinue}
               disabled={loading || applying}
             >
-              {loading
-                ? t("projection.inspecting")
-                : plan
-                  ? t("projection.recheck")
-                  : t("projection.inspect")}
+              {loading ? t("projection.inspecting") : t("projection.inspect")}
             </button>
-            {plan && !plan.blocked && plan.changeCount > 0 && (
-              <button
-                className="button button-primary button-small"
-                onClick={onApply}
-                disabled={applying}
-              >
-                {applying
-                  ? t("projection.applying")
-                  : plan.changeCount === 1
-                    ? t("projection.applyOne")
-                    : t("projection.applyMany", { count: plan.changeCount })}
-              </button>
-            )}
           </span>
         )}
       </footer>
+
+      {plan && (
+        <ConfirmDialog
+          title={plan.blocked
+            ? t("projection.blockedTitle")
+            : t("projection.connectionChangesReady", { count: plan.changeCount })}
+          description={plan.blocked
+            ? t("projection.blockedBody")
+            : t("projection.connectionChangesBody")}
+          tone={plan.blocked ? "danger" : "default"}
+          blocked={plan.blocked || plan.changeCount === 0}
+          confirming={applying}
+          confirmLabel={plan.blocked || plan.changeCount === 0
+            ? undefined
+            : plan.changeCount === 1
+              ? t("projection.applyOne")
+              : t("projection.applyMany", { count: plan.changeCount })}
+          cancelLabel={plan.blocked || plan.changeCount === 0 ? t("libraryPlan.close") : undefined}
+          note={plan.blocked || plan.changeCount === 0
+            ? t("libraryPlan.noChanges")
+            : t("libraryPlan.snapshotNote")}
+          onCancel={onCancelConfirmation}
+          onConfirm={onApply}
+        >
+          <ul className="connection-confirm-list">
+            {plan.steps
+              .filter((step) => step.action !== "none")
+              .map((step) => (
+                <li key={step.agentId}>
+                  <span>
+                    <strong>{step.agentLabel}</strong>
+                    <small>{stepSummary(step.action)}</small>
+                  </span>
+                  <code title={step.targetPath}>{step.targetPath}</code>
+                </li>
+              ))}
+          </ul>
+        </ConfirmDialog>
+      )}
     </section>
   );
 }

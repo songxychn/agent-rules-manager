@@ -1,6 +1,6 @@
 import type { LibraryPlan, LibraryState } from "../lib/types";
 import { useI18n } from "../lib/i18n";
-import { LibraryPlanPreview } from "./LibraryPlanPreview";
+import { LibraryChangeConfirm } from "./LibraryChangeConfirm";
 
 interface LibrarySetupPanelProps {
   state: LibraryState;
@@ -9,7 +9,7 @@ interface LibrarySetupPanelProps {
   plan?: LibraryPlan;
   planning: boolean;
   applying: boolean;
-  onPreview: () => void;
+  onPrepare: () => void;
   onApply: () => void;
   onCancel: () => void;
 }
@@ -21,7 +21,7 @@ export function LibrarySetupPanel({
   plan,
   planning,
   applying,
-  onPreview,
+  onPrepare,
   onApply,
   onCancel,
 }: LibrarySetupPanelProps) {
@@ -29,6 +29,26 @@ export function LibrarySetupPanel({
   const conflict = state === "conflict";
   const legacy = state === "legacy";
   const upgrade = state === "upgrade";
+  const actionLabel = upgrade
+    ? t("setup.startUpgrade")
+    : legacy
+      ? t("setup.startImport")
+      : t("setup.startCreate");
+  const confirmLabel = upgrade
+    ? t("setup.confirmUpgrade")
+    : legacy
+      ? t("setup.confirmImport")
+      : t("setup.confirmCreate");
+  const confirmationTitle = upgrade
+    ? t("setup.upgradeQuestion")
+    : legacy
+      ? t("setup.importQuestion")
+      : t("setup.createQuestion");
+  const confirmationDescription = upgrade
+    ? t("setup.upgradePrompt")
+    : legacy
+      ? t("setup.importPrompt")
+      : t("setup.createPrompt");
 
   return (
     <section className={`source-missing library-setup ${conflict ? "is-conflict" : ""}`}>
@@ -56,19 +76,17 @@ export function LibrarySetupPanel({
       <p>{detail}</p>
       {legacySourcePath && <code className="setup-legacy-path">{legacySourcePath}</code>}
       {!conflict && !plan && (
-        <button className="button button-primary" disabled={planning} onClick={onPreview}>
-          {planning ? t("libraryPlan.previewing") : t("setup.preview")}
+        <button className="button button-primary" disabled={planning} onClick={onPrepare}>
+          {planning ? t("libraryPlan.preparing") : actionLabel}
         </button>
       )}
       {plan && (
-        <LibraryPlanPreview
+        <LibraryChangeConfirm
           plan={plan}
+          title={confirmationTitle}
+          description={confirmationDescription}
           confirming={applying}
-          confirmLabel={upgrade
-            ? t("setup.confirmUpgrade")
-            : legacy
-              ? t("setup.confirmImport")
-              : t("setup.confirmCreate")}
+          confirmLabel={confirmLabel}
           onCancel={onCancel}
           onConfirm={onApply}
         />

@@ -66,7 +66,9 @@ Rules:
 - every instruction: a unique relative `.md` path with only normal path components;
 - every source: a regular UTF-8 file; symlinks are rejected.
 
-Creating a Profile writes `profile.json` and its required `AGENTS.md` together. Adding a supplemental source updates the manifest and creates the file in one previewed transaction. Existing paths are never overwritten.
+Creating a Profile writes `profile.json` and its required `AGENTS.md` together. Adding a supplemental source updates the manifest and creates the file in one previewed transaction. Existing paths are never overwritten. Removing a supplemental source updates the manifest and deletes that exact declared file in one rollback-protected transaction. The required `AGENTS.md` entrypoint cannot be removed, and undeclared paths are never touched.
+
+Deleting a Profile is also previewed and rollback-protected. It is allowed only while the Profile is inactive on the current machine and only when its directory contains exactly `profile.json`, the declared instruction files, and their parent directories. Any undeclared file, directory, or symlink blocks the complete deletion. The transaction snapshots every owned file, removes the empty directory tree, and restores the files and directories on rollback unless a deleted path has since drifted.
 
 Profile documents contain no active flag. The same synced Profile can be active on one machine and inactive on another without changing source files.
 
