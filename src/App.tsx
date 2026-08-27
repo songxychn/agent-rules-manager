@@ -4,7 +4,6 @@ import { LibrarySetupPanel } from "./components/LibrarySetupPanel";
 import { ProfilesPage } from "./components/ProfilesPage";
 import { ProjectionRail } from "./components/ProjectionRail";
 import { SettingsPage } from "./components/SettingsPage";
-import { SourceOpenControl } from "./components/SourceOpenControl";
 import { backend } from "./lib/backend";
 import { useI18n } from "./lib/i18n";
 import { readPreferredOpenTarget, writePreferredOpenTarget } from "./lib/openTargets";
@@ -153,7 +152,7 @@ function App() {
     window.scrollTo({ top: 0, left: 0, behavior: "auto" });
   }, [view]);
 
-  const previewProjection = async () => {
+  const prepareProjectionConfirmation = async () => {
     const current = snapshotRef.current;
     if (!current) return;
     const changes = connectionChanges(current, desiredConnections);
@@ -209,7 +208,7 @@ function App() {
     }
   };
 
-  const previewInitialize = async () => {
+  const prepareInitializeConfirmation = async () => {
     setBusy("planning-library");
     try {
       setSetupPlan(await backend.previewInitialize(libraryRoot || undefined));
@@ -262,13 +261,6 @@ function App() {
     }
   };
 
-  const openProfileFile = (profileId: string, relativePath: string) => {
-    const targetId = openTargets.some((target) => target.id === preferredOpenTarget)
-      ? preferredOpenTarget
-      : openTargets[0]?.id;
-    if (targetId) void openRuleSource(targetId, profileId, relativePath);
-  };
-
   const createProfile = async (draft: ProfileDraft) => {
     await backend.createProfile(draft, libraryRoot);
     await loadSnapshot(libraryRoot);
@@ -282,6 +274,21 @@ function App() {
       tone: "success",
       message: t("notice.profileFileAdded", { path: draft.relativePath }),
     });
+  };
+
+  const removeProfileFile = async (draft: ProfileFileDraft) => {
+    await backend.removeProfileFile(draft, libraryRoot);
+    await loadSnapshot(libraryRoot);
+    setNotice({
+      tone: "success",
+      message: t("notice.profileFileRemoved", { path: draft.relativePath }),
+    });
+  };
+
+  const deleteProfile = async (profileId: string) => {
+    await backend.deleteProfile(profileId, libraryRoot);
+    await loadSnapshot(libraryRoot);
+    setNotice({ tone: "success", message: t("notice.profileDeleted", { id: profileId }) });
   };
 
   const activateProfile = async (profileId: string) => {
@@ -309,8 +316,6 @@ function App() {
   const connected = installed.filter((agent) => agent.connected).length;
   const pendingChanges = connectionChanges(snapshot, desiredConnections);
   const activeProfile = snapshot.profiles.find((profile) => profile.isActive);
-  const activeFile = activeProfile?.files.find((file) => file.path === "AGENTS.md")
-    ?? activeProfile?.files[0];
   const pageTitle = t(`nav.${view}` as "nav.control");
   const pageCount =
     view === "control"
@@ -327,12 +332,20 @@ function App() {
           profiles={snapshot.profiles}
           runtimeState={snapshot.runtimeState}
           latestLibraryBackup={snapshot.latestLibraryBackup}
-          onOpen={openProfileFile}
-          onPreviewCreate={(draft) => backend.previewCreateProfile(draft, libraryRoot)}
+          openTargets={openTargets}
+          preferredOpenTargetId={preferredOpenTarget}
+          openingTargetId={openingTargetId}
+          onOpen={(profileId, relativePath, targetId) =>
+            void openRuleSource(targetId, profileId, relativePath)}
+          onPrepareCreate={(draft) => backend.previewCreateProfile(draft, libraryRoot)}
           onCreate={createProfile}
-          onPreviewAddFile={(draft) => backend.previewAddProfileFile(draft, libraryRoot)}
+          onPrepareAddFile={(draft) => backend.previewAddProfileFile(draft, libraryRoot)}
           onAddFile={addProfileFile}
-          onPreviewActivate={(profileId) => backend.previewActivateProfile(profileId, libraryRoot)}
+          onPrepareRemoveFile={(draft) => backend.previewRemoveProfileFile(draft, libraryRoot)}
+          onRemoveFile={removeProfileFile}
+          onPrepareDelete={(profileId) => backend.previewDeleteProfile(profileId, libraryRoot)}
+          onDelete={deleteProfile}
+          onPrepareActivate={(profileId) => backend.previewActivateProfile(profileId, libraryRoot)}
           onActivate={activateProfile}
           onRollback={rollbackLibrary}
         />
@@ -372,8 +385,9 @@ function App() {
             });
             setPlan(undefined);
           }}
-          onInspect={() => void previewProjection()}
+          onContinue={() => void prepareProjectionConfirmation()}
           onApply={() => void applyProjection()}
+          onCancelConfirmation={() => setPlan(undefined)}
         />
       </>
     );
@@ -466,14 +480,6 @@ function App() {
                 {busy === "rollback" ? t("rollback.restoring") : t("rollback.latest")}
               </button>
             )}
-            {view === "control" && activeProfile && activeFile && snapshot.sourceExists && (
-              <SourceOpenControl
-                targets={openTargets}
-                preferredTargetId={preferredOpenTarget}
-                openingTargetId={openingTargetId}
-                onOpen={(targetId) => void openRuleSource(targetId, activeProfile.id, activeFile.path)}
-              />
-            )}
           </div>
         </header>
 
@@ -493,7 +499,7 @@ function App() {
               plan={setupPlan}
               planning={busy === "planning-library"}
               applying={busy === "initializing"}
-              onPreview={() => void previewInitialize()}
+              onPrepare={() => void prepareInitializeConfirmation()}
               onApply={() => void initialize()}
               onCancel={() => setSetupPlan(undefined)}
             />

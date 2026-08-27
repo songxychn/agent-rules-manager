@@ -101,6 +101,52 @@ fn add_profile_file(
 }
 
 #[tauri::command]
+fn preview_remove_profile_file(
+    app: AppHandle,
+    library_root: Option<String>,
+    profile_id: String,
+    relative_path: String,
+) -> Result<LibraryPlan, String> {
+    build_manager(&app, library_root)?
+        .plan_remove_profile_file(&profile_id, &relative_path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn remove_profile_file(
+    app: AppHandle,
+    library_root: Option<String>,
+    profile_id: String,
+    relative_path: String,
+) -> Result<LibraryMutationOutcome, String> {
+    build_manager(&app, library_root)?
+        .remove_profile_file(&profile_id, &relative_path)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn preview_delete_profile(
+    app: AppHandle,
+    library_root: Option<String>,
+    profile_id: String,
+) -> Result<LibraryPlan, String> {
+    build_manager(&app, library_root)?
+        .plan_delete_profile(&profile_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
+fn delete_profile(
+    app: AppHandle,
+    library_root: Option<String>,
+    profile_id: String,
+) -> Result<LibraryMutationOutcome, String> {
+    build_manager(&app, library_root)?
+        .delete_profile(&profile_id)
+        .map_err(|error| error.to_string())
+}
+
+#[tauri::command]
 fn preview_activate_profile(
     app: AppHandle,
     library_root: Option<String>,
@@ -195,6 +241,10 @@ pub fn run() {
             create_profile,
             preview_add_profile_file,
             add_profile_file,
+            preview_remove_profile_file,
+            remove_profile_file,
+            preview_delete_profile,
+            delete_profile,
             preview_activate_profile,
             activate_profile,
             preview_apply,

@@ -148,6 +148,10 @@ cargo run -p arm-cli -- profiles create work --name "Work"
 cargo run -p arm-cli -- profiles create work --name "Work" --apply
 cargo run -p arm-cli -- profiles add-file work rules/review.md
 cargo run -p arm-cli -- profiles add-file work rules/review.md --apply
+cargo run -p arm-cli -- profiles remove-file work rules/review.md
+cargo run -p arm-cli -- profiles remove-file work rules/review.md --apply
+cargo run -p arm-cli -- profiles delete work
+cargo run -p arm-cli -- profiles delete work --apply
 cargo run -p arm-cli -- profiles activate work
 cargo run -p arm-cli -- profiles activate work --apply
 cargo run -p arm-cli -- profiles rollback

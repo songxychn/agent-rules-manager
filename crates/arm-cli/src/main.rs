@@ -101,6 +101,23 @@ enum ProfileCommand {
         #[arg(long)]
         json: bool,
     },
+    /// Preview or remove a supplemental Markdown source from a Profile.
+    RemoveFile {
+        profile_id: String,
+        relative_path: String,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
+    /// Preview or delete an inactive Profile and all of its declared sources.
+    Delete {
+        id: String,
+        #[arg(long)]
+        apply: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview or activate a Profile only on this machine.
     Activate {
         id: String,
@@ -224,6 +241,31 @@ fn run() -> Result<(), ArmError> {
                         manager.plan_add_profile_file(&profile_id, &relative_path)?,
                         json,
                     )?;
+                }
+            }
+            ProfileCommand::RemoveFile {
+                profile_id,
+                relative_path,
+                apply,
+                json,
+            } => {
+                if apply {
+                    print_mutation(
+                        manager.remove_profile_file(&profile_id, &relative_path)?,
+                        json,
+                    )?;
+                } else {
+                    print_library_plan(
+                        manager.plan_remove_profile_file(&profile_id, &relative_path)?,
+                        json,
+                    )?;
+                }
+            }
+            ProfileCommand::Delete { id, apply, json } => {
+                if apply {
+                    print_mutation(manager.delete_profile(&id)?, json)?;
+                } else {
+                    print_library_plan(manager.plan_delete_profile(&id)?, json)?;
                 }
             }
             ProfileCommand::Activate { id, apply, json } => {

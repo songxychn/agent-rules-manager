@@ -134,6 +134,35 @@ impl RulesManager {
         )
     }
 
+    pub fn plan_remove_profile_file(
+        &self,
+        profile_id: &str,
+        relative_path: &str,
+    ) -> Result<LibraryPlan, ArmError> {
+        library::plan_remove_profile_file(&self.library_root, profile_id, relative_path)
+    }
+
+    pub fn remove_profile_file(
+        &self,
+        profile_id: &str,
+        relative_path: &str,
+    ) -> Result<LibraryMutationOutcome, ArmError> {
+        library::remove_profile_file(
+            &self.library_root,
+            &self.state_root,
+            profile_id,
+            relative_path,
+        )
+    }
+
+    pub fn plan_delete_profile(&self, profile_id: &str) -> Result<LibraryPlan, ArmError> {
+        library::plan_delete_profile(&self.library_root, &self.state_root, profile_id)
+    }
+
+    pub fn delete_profile(&self, profile_id: &str) -> Result<LibraryMutationOutcome, ArmError> {
+        library::delete_profile(&self.library_root, &self.state_root, profile_id)
+    }
+
     pub fn plan_activate_profile(&self, profile_id: &str) -> Result<LibraryPlan, ArmError> {
         library::plan_activate_profile(&self.library_root, &self.state_root, profile_id)
     }

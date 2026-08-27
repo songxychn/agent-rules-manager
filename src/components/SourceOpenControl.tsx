@@ -14,6 +14,8 @@ import vscodeIcon from "../assets/open-target-icons/vscode.png";
 import webstormIcon from "../assets/open-target-icons/webstorm.png";
 
 interface SourceOpenControlProps {
+  fileName: string;
+  actionLabel: string;
   targets: OpenTarget[];
   preferredTargetId: string;
   openingTargetId?: string;
@@ -46,6 +48,8 @@ function OpenTargetIcon({ target }: { target: OpenTarget }) {
 }
 
 export function SourceOpenControl({
+  fileName,
+  actionLabel,
   targets,
   preferredTargetId,
   openingTargetId,
@@ -64,7 +68,7 @@ export function SourceOpenControl({
   const primaryLabel = openingTargetId
     ? t("source.open.opening")
     : activeTarget
-      ? t("source.open.with", { app: targetLabel(activeTarget) })
+      ? t("source.open.with", { file: fileName, app: targetLabel(activeTarget) })
       : t("source.open.unavailable");
 
   useEffect(() => {
@@ -112,7 +116,7 @@ export function SourceOpenControl({
   };
 
   return (
-    <div className="open-target-picker" ref={pickerRef}>
+    <div className={`open-target-picker ${menuOpen ? "is-open" : ""}`} ref={pickerRef}>
       <div className="open-target-split">
         <button
           className="open-target-primary"
@@ -122,7 +126,10 @@ export function SourceOpenControl({
           onClick={() => activeTarget && onOpen(activeTarget.id)}
         >
           {activeTarget ? (
-            <OpenTargetIcon target={activeTarget} />
+            <>
+              <OpenTargetIcon target={activeTarget} />
+              <span>{actionLabel}</span>
+            </>
           ) : (
             <img
               className="open-target-icon"
@@ -138,7 +145,7 @@ export function SourceOpenControl({
           ref={toggleRef}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
-          aria-label={t("source.open.menu")}
+          aria-label={t("source.open.menu", { file: fileName })}
           disabled={!targets.length || Boolean(openingTargetId)}
           onClick={(event) => {
             focusFirstOnOpen.current = event.detail === 0;
@@ -152,7 +159,11 @@ export function SourceOpenControl({
       </div>
 
       {menuOpen && (
-        <div className="open-target-menu" role="menu" aria-label={t("source.open.menu")}>
+        <div
+          className="open-target-menu"
+          role="menu"
+          aria-label={t("source.open.menu", { file: fileName })}
+        >
           {targets.map(renderTarget)}
         </div>
       )}
