@@ -476,11 +476,23 @@ export const backend = {
     }
     return false;
   },
-  async apply(changes: ConnectionChange[], libraryRoot?: string): Promise<ApplyOutcome> {
+  async apply(
+    changes: ConnectionChange[],
+    confirmExistingFiles: boolean,
+    libraryRoot?: string,
+  ): Promise<ApplyOutcome> {
     if (isTauri) {
-      return invoke("apply_rules", { changes, libraryRoot });
+      return invoke("apply_rules", { changes, confirmExistingFiles, libraryRoot });
     }
     const requested = new Map(changes.map((change) => [change.agentId, change.connected]));
+    const existingFiles = demoSnapshot.agents.filter(
+      (agent) =>
+        requested.get(agent.id) === true &&
+        (agent.targetKind === "independentFile" || agent.targetKind === "invalidManagedFile"),
+    );
+    if (existingFiles.length > 0 && !confirmExistingFiles) {
+      throw new Error("Confirmation is required before existing files are backed up and replaced.");
+    }
     const changed: string[] = [];
     const before = structuredClone(demoSnapshot);
     demoSnapshot = {
@@ -512,7 +524,13 @@ export const backend = {
       }),
     };
     if (changed.length) demoRollbackSnapshot = before;
-    return { changed, backupId: changed.length ? "demo-apply-snapshot" : undefined };
+    return {
+      changed,
+      backupId: changed.length ? "demo-apply-snapshot" : undefined,
+      preservedBackupDir: existingFiles.length
+        ? "<local state>/backups/originals/demo-apply-snapshot"
+        : undefined,
+    };
   },
   async rollback(libraryRoot?: string): Promise<RollbackOutcome> {
     if (isTauri) {

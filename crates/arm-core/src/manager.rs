@@ -51,6 +51,7 @@ struct PreparedChange {
     path: PathBuf,
     original: FileState,
     desired: FileState,
+    preserve_original: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -244,6 +245,7 @@ impl RulesManager {
         let requested = self.resolve_connection_changes(changes)?;
         let mut blocked = false;
         let mut change_count = 0;
+        let mut confirmation_count = 0;
         let mut steps = Vec::new();
 
         for adapter in self
@@ -253,6 +255,7 @@ impl RulesManager {
         {
             let status = self.inspect_adapter(adapter, &source_path, legacy_source)?;
             let desired_connected = requested[&adapter.id];
+            let mut requires_confirmation = false;
             let (action, summary) = match (desired_connected, status.target_kind) {
                 (true, TargetKind::ConnectedLink) => (
                     "none",
@@ -278,25 +281,38 @@ impl RulesManager {
                             "Replace the legacy managed include with a symbolic link.",
                         )
                     } else {
-                        blocked = true;
+                        change_count += 1;
+                        confirmation_count += 1;
+                        requires_confirmation = true;
                         (
-                            "blocked",
-                            "Legacy managed content is mixed with agent-specific rules; disconnect it before moving those rules aside.",
+                            "backupAndCreateLink",
+                            "Back up the complete existing file, then replace it with a symbolic link after confirmation.",
                         )
                     }
                 }
                 (true, TargetKind::IndependentFile) => {
-                    blocked = true;
+                    change_count += 1;
+                    confirmation_count += 1;
+                    requires_confirmation = true;
                     (
-                        "blocked",
-                        "An independent rules file is present and will not be overwritten.",
+                        "backupAndCreateLink",
+                        "Back up the existing independent file, then replace it with a symbolic link after confirmation.",
                     )
                 }
-                (true, TargetKind::ForeignLink | TargetKind::InvalidManagedFile) => {
+                (true, TargetKind::InvalidManagedFile) => {
+                    change_count += 1;
+                    confirmation_count += 1;
+                    requires_confirmation = true;
+                    (
+                        "backupAndCreateLink",
+                        "Back up the complete malformed regular file, then replace it with a symbolic link after confirmation.",
+                    )
+                }
+                (true, TargetKind::ForeignLink) => {
                     blocked = true;
                     (
                         "blocked",
-                        "An unexpected link or malformed managed file is present.",
+                        "An unexpected symbolic link is present and will not be replaced.",
                     )
                 }
                 (false, TargetKind::ConnectedLink) => {
@@ -330,6 +346,7 @@ impl RulesManager {
                 desired_connected,
                 action: action.into(),
                 summary: summary.into(),
+                requires_confirmation,
             });
         }
 
@@ -337,11 +354,20 @@ impl RulesManager {
             source_path: source_path.display().to_string(),
             blocked,
             change_count,
+            confirmation_count,
             steps,
         })
     }
 
     pub fn apply(&self, selected: &[String]) -> Result<ApplyOutcome, ArmError> {
+        self.apply_confirmed(selected, false)
+    }
+
+    pub fn apply_confirmed(
+        &self,
+        selected: &[String],
+        confirm_existing_files: bool,
+    ) -> Result<ApplyOutcome, ArmError> {
         let selected = self.resolve_selection(selected)?;
         let changes = selected
             .into_iter()
@@ -350,12 +376,20 @@ impl RulesManager {
                 connected: true,
             })
             .collect::<Vec<_>>();
-        self.apply_connections(&changes)
+        self.apply_connections_confirmed(&changes, confirm_existing_files)
     }
 
     pub fn apply_connections(
         &self,
         changes: &[ConnectionChange],
+    ) -> Result<ApplyOutcome, ArmError> {
+        self.apply_connections_confirmed(changes, false)
+    }
+
+    pub fn apply_connections_confirmed(
+        &self,
+        changes: &[ConnectionChange],
+        confirm_existing_files: bool,
     ) -> Result<ApplyOutcome, ArmError> {
         let source = self.source_path();
         let metadata = fs::metadata(&source)
@@ -377,6 +411,16 @@ impl RulesManager {
                 .join(", ");
             return Err(ArmError::Blocked(targets));
         }
+        if plan.confirmation_count > 0 && !confirm_existing_files {
+            let targets = plan
+                .steps
+                .iter()
+                .filter(|step| step.requires_confirmation)
+                .map(|step| step.target_path.as_str())
+                .collect::<Vec<_>>()
+                .join(", ");
+            return Err(ArmError::ConfirmationRequired(targets));
+        }
 
         let changed_steps = plan
             .steps
@@ -387,6 +431,7 @@ impl RulesManager {
             return Ok(ApplyOutcome {
                 changed: Vec::new(),
                 backup_id: None,
+                preserved_backup_dir: None,
             });
         }
 
@@ -407,6 +452,7 @@ impl RulesManager {
                 path,
                 original,
                 desired,
+                preserve_original: step.requires_confirmation,
             });
         }
         let backup = BackupSnapshot {
@@ -423,7 +469,16 @@ impl RulesManager {
                 })
                 .collect::<Result<Vec<_>, ArmError>>()?,
         };
-        let backup_path = self.write_backup(&backup)?;
+        let preserved_backup_dir = self.write_preserved_originals(&backup_id, &prepared)?;
+        let backup_path = match self.write_backup(&backup) {
+            Ok(path) => path,
+            Err(error) => {
+                if let Some(path) = &preserved_backup_dir {
+                    let _ = fs::remove_dir_all(path);
+                }
+                return Err(error);
+            }
+        };
 
         let mut completed = Vec::new();
         for (index, change) in prepared.iter().enumerate() {
@@ -462,6 +517,7 @@ impl RulesManager {
         Ok(ApplyOutcome {
             changed: completed,
             backup_id: Some(backup_id),
+            preserved_backup_dir: preserved_backup_dir.map(|path| path.display().to_string()),
         })
     }
 
@@ -563,6 +619,64 @@ impl RulesManager {
         let data = serde_json::to_string_pretty(backup)?;
         write_atomic(&path, &data)?;
         Ok(path)
+    }
+
+    fn write_preserved_originals(
+        &self,
+        backup_id: &str,
+        changes: &[PreparedChange],
+    ) -> Result<Option<PathBuf>, ArmError> {
+        let preserved = changes
+            .iter()
+            .filter(|change| change.preserve_original)
+            .collect::<Vec<_>>();
+        if preserved.is_empty() {
+            return Ok(None);
+        }
+
+        let originals_root = self.state_root.join("backups/originals");
+        fs::create_dir_all(&originals_root)
+            .map_err(|error| ArmError::io(originals_root.display().to_string(), error))?;
+        let final_path = originals_root.join(backup_id);
+        if fs::symlink_metadata(&final_path).is_ok() {
+            return Err(ArmError::UnsupportedEntry(final_path.display().to_string()));
+        }
+        let temporary = originals_root.join(format!(
+            ".{backup_id}-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        fs::create_dir(&temporary)
+            .map_err(|error| ArmError::io(temporary.display().to_string(), error))?;
+
+        let write_result = preserved
+            .iter()
+            .enumerate()
+            .try_for_each(|(index, change)| {
+                let FileState::File { content } = &change.original else {
+                    return Err(ArmError::ApplyDrift(change.path.display().to_string()));
+                };
+                let file_name = change
+                    .path
+                    .file_name()
+                    .ok_or_else(|| ArmError::UnsupportedEntry(change.path.display().to_string()))?;
+                let agent_dir = temporary.join(format!(
+                    "{index:02}-{}",
+                    safe_backup_component(&change.agent_id)
+                ));
+                fs::create_dir(&agent_dir)
+                    .map_err(|error| ArmError::io(agent_dir.display().to_string(), error))?;
+                write_atomic(&agent_dir.join(file_name), content)
+            });
+        if let Err(error) = write_result {
+            let _ = fs::remove_dir_all(&temporary);
+            return Err(error);
+        }
+        if let Err(error) = fs::rename(&temporary, &final_path) {
+            let _ = fs::remove_dir_all(&temporary);
+            return Err(ArmError::io(final_path.display().to_string(), error));
+        }
+        Ok(Some(final_path))
     }
 
     fn archive_backup(&self, backup_path: &Path) -> Result<(), ArmError> {
@@ -674,6 +788,24 @@ fn logical_paths_equal(left: &Path, right: &Path) -> bool {
         }
     };
     normalize_logical_path(&make_absolute(left)) == normalize_logical_path(&make_absolute(right))
+}
+
+fn safe_backup_component(value: &str) -> String {
+    let sanitized = value
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() || character == '-' || character == '_' {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    if sanitized.is_empty() {
+        "agent".into()
+    } else {
+        sanitized
+    }
 }
 
 fn symlink_state_points_to(target_path: &Path, linked: &str, expected: &Path) -> bool {
@@ -931,6 +1063,11 @@ fn desired_connection_state(
                 target: source.display().to_string(),
             })
         }
+        "backupAndCreateLink" if matches!(current, FileState::File { .. }) => {
+            Ok(FileState::Symlink {
+                target: source.display().to_string(),
+            })
+        }
         "createIndependentFile" => {
             let FileState::Symlink { target: linked } = current else {
                 return Err(ArmError::ApplyDrift(
@@ -1106,18 +1243,64 @@ mod tests {
     }
 
     #[test]
-    fn unmanaged_regular_file_blocks_the_whole_apply() {
+    fn unmanaged_regular_file_requires_confirmation_and_is_preserved() {
         let (_root, manager, home) = fixture();
         manager.initialize().expect("initialize");
         let codex = home.join(".codex/AGENTS.md");
         fs::create_dir_all(codex.parent().unwrap()).expect("codex dir");
         fs::write(&codex, "keep me").expect("codex file");
 
-        let plan = manager.plan(&[]).expect("plan");
-        assert!(plan.blocked);
-        assert!(matches!(manager.apply(&[]), Err(ArmError::Blocked(_))));
+        let plan = manager.plan(&["codex".into()]).expect("plan");
+        assert!(!plan.blocked);
+        assert_eq!(plan.change_count, 1);
+        assert_eq!(plan.confirmation_count, 1);
+        assert_eq!(plan.steps[0].action, "backupAndCreateLink");
+        assert!(plan.steps[0].requires_confirmation);
+        assert!(matches!(
+            manager.apply(&["codex".into()]),
+            Err(ArmError::ConfirmationRequired(_))
+        ));
+        assert_eq!(fs::read_to_string(&codex).unwrap(), "keep me");
+
+        let applied = manager
+            .apply_confirmed(&["codex".into()], true)
+            .expect("confirmed apply");
+        let preserved_dir = PathBuf::from(
+            applied
+                .preserved_backup_dir
+                .as_deref()
+                .expect("preserved backup directory"),
+        );
+        assert!(codex.is_symlink());
+        assert_eq!(
+            fs::read_to_string(preserved_dir.join("00-codex/AGENTS.md")).unwrap(),
+            "keep me"
+        );
+
+        manager.rollback_latest().expect("rollback takeover");
+        assert!(!codex.is_symlink());
         assert_eq!(fs::read_to_string(codex).unwrap(), "keep me");
-        assert!(!home.join(".grok/AGENTS.md").exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn foreign_symlink_stays_blocked_after_takeover_confirmation() {
+        let (_root, manager, home) = fixture();
+        manager.initialize().expect("initialize");
+        let external = home.join("external.md");
+        fs::write(&external, "external rules").expect("external rules");
+        let codex = home.join(".codex/AGENTS.md");
+        fs::create_dir_all(codex.parent().unwrap()).expect("codex dir");
+        std::os::unix::fs::symlink(&external, &codex).expect("foreign link");
+
+        let plan = manager.plan(&["codex".into()]).expect("plan");
+        assert!(plan.blocked);
+        assert_eq!(plan.confirmation_count, 0);
+        assert!(matches!(
+            manager.apply_confirmed(&["codex".into()], true),
+            Err(ArmError::Blocked(_))
+        ));
+        assert_eq!(fs::read_link(codex).unwrap(), external);
     }
 
     #[cfg(unix)]
@@ -1268,6 +1451,27 @@ mod tests {
     }
 
     #[test]
+    fn preserved_copy_failure_prevents_existing_file_takeover() {
+        let root = TempDir::new().expect("temp root");
+        let home = root.path().join("home");
+        let library = home.join(".agent-rules");
+        let state_root = home.join("state");
+        fs::create_dir_all(&home).expect("home");
+        let manager = RulesManager::new(library, state_root.clone(), &home);
+        manager.initialize().expect("initialize");
+        let codex = home.join(".codex/AGENTS.md");
+        fs::create_dir_all(codex.parent().unwrap()).expect("codex dir");
+        fs::write(&codex, "keep me").expect("codex file");
+        fs::create_dir_all(state_root.join("backups")).expect("backup dir");
+        fs::write(state_root.join("backups/originals"), "not a directory")
+            .expect("original backup blocker");
+
+        assert!(manager.apply_confirmed(&["codex".into()], true).is_err());
+        assert!(!codex.is_symlink());
+        assert_eq!(fs::read_to_string(codex).unwrap(), "keep me");
+    }
+
+    #[test]
     fn automatic_restore_never_overwrites_a_concurrent_change() {
         let root = TempDir::new().expect("temp root");
         let first = root.path().join("first.md");
@@ -1284,6 +1488,7 @@ mod tests {
                 desired: FileState::File {
                     content: "applied first".into(),
                 },
+                preserve_original: false,
             },
             PreparedChange {
                 agent_id: "second".into(),
@@ -1294,6 +1499,7 @@ mod tests {
                 desired: FileState::File {
                     content: "applied second".into(),
                 },
+                preserve_original: false,
             },
         ];
 

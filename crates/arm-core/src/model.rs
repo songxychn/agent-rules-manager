@@ -132,6 +132,7 @@ pub struct PlanStep {
     pub desired_connected: bool,
     pub action: String,
     pub summary: String,
+    pub requires_confirmation: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -140,6 +141,7 @@ pub struct ProjectionPlan {
     pub source_path: String,
     pub blocked: bool,
     pub change_count: usize,
+    pub confirmation_count: usize,
     pub steps: Vec<PlanStep>,
 }
 
@@ -166,6 +168,7 @@ pub struct LibraryPlan {
 pub struct ApplyOutcome {
     pub changed: Vec<String>,
     pub backup_id: Option<String>,
+    pub preserved_backup_dir: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -196,6 +199,10 @@ pub enum ArmError {
     MissingSource(String),
     #[error("apply is blocked by an unmanaged target: {0}")]
     Blocked(String),
+    #[error(
+        "confirmation is required before existing regular files are backed up and replaced: {0}"
+    )]
+    ConfirmationRequired(String),
     #[error("apply stopped because {0} changed after the plan was prepared")]
     ApplyDrift(String),
     #[error("unknown agent adapter: {0}")]
