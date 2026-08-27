@@ -50,11 +50,14 @@ describe("buildProjectionPlan", () => {
     expect(plan.blocked).toBe(false);
   });
 
-  it("reports a selected unmanaged conflict", () => {
+  it("requires confirmation before replacing an existing regular file", () => {
     const plan = buildProjectionPlan(snapshot, [{ agentId: "claude", connected: true }]);
 
-    expect(plan.blocked).toBe(true);
-    expect(plan.steps[0].action).toBe("blocked");
+    expect(plan.blocked).toBe(false);
+    expect(plan.changeCount).toBe(1);
+    expect(plan.confirmationCount).toBe(1);
+    expect(plan.steps[0].action).toBe("backupAndCreateLink");
+    expect(plan.steps[0].requiresConfirmation).toBe(true);
   });
 
   it("plans both connecting and disconnecting", () => {
@@ -79,6 +82,7 @@ describe("buildProjectionPlan", () => {
 
     expect(plan.blocked).toBe(false);
     expect(plan.changeCount).toBe(2);
+    expect(plan.confirmationCount).toBe(0);
     expect(plan.steps.map((step) => step.action)).toEqual([
       "createLink",
       "createIndependentFile",

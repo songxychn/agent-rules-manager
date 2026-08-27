@@ -133,6 +133,8 @@ profiles/work/rules/review.md ─┴─ render ── .runtime/work-<digest>/
 
 Adapter 只处理 Agent 协议差异；同步的 Profile 内容保持 CLI 和 Provider 中立。检测不会读取凭据、会话或登录状态。应用状态和备份位于平台应用数据目录，不放进规则库。
 
+若 Agent 原生路径已有常规文件，接入计划不会再直接阻止启用，而会标记为“需确认接管”。确认后，程序先把完整旧文件保存到应用状态目录的 `backups/originals/<快照 ID>/`，再将原生路径替换为中央规则软链接；既有回滚快照仍会同时保留。指向未知位置的软链接、目录及其他不受支持的文件系统条目继续硬阻止，避免误接管外部数据。
+
 ## CLI
 
 规则库写命令默认只输出计划，加 `--apply` 才执行：
@@ -160,6 +162,8 @@ cargo run -p arm-cli -- profiles rollback
 cargo run -p arm-cli -- status
 cargo run -p arm-cli -- plan
 cargo run -p arm-cli -- apply --agents codex,claude
+# 原生路径已有常规文件时，显式确认先备份再接管
+cargo run -p arm-cli -- apply --agents codex --backup-existing
 cargo run -p arm-cli -- plan --agents qwen --disconnect
 cargo run -p arm-cli -- apply --agents qwen --disconnect
 cargo run -p arm-cli -- rollback

@@ -56,13 +56,16 @@ enum Command {
         #[arg(long)]
         json: bool,
     },
-    /// Apply the current agent projection plan after refusing unmanaged conflicts.
+    /// Apply the current agent projection plan.
     Apply {
         #[arg(long, value_delimiter = ',')]
         agents: Vec<String>,
         /// Materialize independent native files for the selected connected agents.
         #[arg(long)]
         disconnect: bool,
+        /// Confirm backing up existing regular files before replacing them with managed links.
+        #[arg(long)]
+        backup_existing: bool,
         #[arg(long)]
         json: bool,
     },
@@ -311,17 +314,27 @@ fn run() -> Result<(), ArmError> {
                     plan.change_count,
                     if plan.blocked { ", blocked" } else { "" }
                 );
+                if plan.confirmation_count > 0 {
+                    println!(
+                        "{} existing regular file(s) require --backup-existing when applying.",
+                        plan.confirmation_count
+                    );
+                }
             }
         }
         Command::Apply {
             agents,
             disconnect,
+            backup_existing,
             json,
         } => {
             let outcome = if disconnect {
-                manager.apply_connections(&connection_changes(&agents, false))?
+                manager.apply_connections_confirmed(
+                    &connection_changes(&agents, false),
+                    backup_existing,
+                )?
             } else {
-                manager.apply(&agents)?
+                manager.apply_confirmed(&agents, backup_existing)?
             };
             if json {
                 print_json(&outcome)?;
@@ -331,6 +344,9 @@ fn run() -> Result<(), ArmError> {
                 println!("Applied to {}.", outcome.changed.join(", "));
                 if let Some(backup) = outcome.backup_id {
                     println!("Rollback snapshot: {backup}");
+                }
+                if let Some(directory) = outcome.preserved_backup_dir {
+                    println!("Preserved original files: {directory}");
                 }
             }
         }

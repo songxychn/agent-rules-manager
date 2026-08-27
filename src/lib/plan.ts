@@ -11,6 +11,7 @@ export function buildProjectionPlan(
       const desiredConnected = requested.get(agent.id) ?? agent.connected;
       let action = "none";
       let summary = "Already uses the selected connection mode.";
+      let requiresConfirmation = false;
 
       if (desiredConnected && agent.targetKind === "legacyLink") {
         action = "replaceLegacyLink";
@@ -22,9 +23,16 @@ export function buildProjectionPlan(
         if (desiredConnected && agent.targetKind === "missing") {
           action = "createLink";
           summary = "Create a symbolic link to the canonical rules file.";
+        } else if (
+          desiredConnected &&
+          (agent.targetKind === "independentFile" || agent.targetKind === "invalidManagedFile")
+        ) {
+          action = "backupAndCreateLink";
+          summary = "Back up the existing regular file, then replace it with a symbolic link.";
+          requiresConfirmation = true;
         } else if (desiredConnected) {
           action = "blocked";
-          summary = "The existing independent file or unexpected link will not be overwritten.";
+          summary = "The unexpected symbolic link will not be replaced.";
         } else if (agent.targetKind === "connectedLink") {
           action = "createIndependentFile";
           summary = "Replace the managed link with an independent copy.";
@@ -42,6 +50,7 @@ export function buildProjectionPlan(
         desiredConnected,
         action,
         summary,
+        requiresConfirmation,
       };
     });
 
@@ -49,6 +58,7 @@ export function buildProjectionPlan(
     sourcePath: snapshot.sourcePath,
     blocked: steps.some((step) => step.action === "blocked"),
     changeCount: steps.filter((step) => step.action !== "none" && step.action !== "blocked").length,
+    confirmationCount: steps.filter((step) => step.requiresConfirmation).length,
     steps,
   };
 }

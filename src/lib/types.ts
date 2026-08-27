@@ -77,12 +77,14 @@ export interface PlanStep {
   desiredConnected: boolean;
   action: string;
   summary: string;
+  requiresConfirmation: boolean;
 }
 
 export interface ProjectionPlan {
   sourcePath: string;
   blocked: boolean;
   changeCount: number;
+  confirmationCount: number;
   steps: PlanStep[];
 }
 
@@ -103,6 +105,7 @@ export interface LibraryPlan {
 export interface ApplyOutcome {
   changed: string[];
   backupId?: string;
+  preservedBackupDir?: string;
 }
 
 export interface LibraryMutationOutcome {

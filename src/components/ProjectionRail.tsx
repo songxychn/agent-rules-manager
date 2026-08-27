@@ -44,6 +44,7 @@ export function ProjectionRail({
 
   const stepSummary = (action: string) => {
     if (action === "blocked") return t("projection.step.conflict");
+    if (action === "backupAndCreateLink") return t("projection.step.backupAndCreateLink");
     if (action === "createLink") return t("projection.step.createLink");
     if (action === "createIndependentFile") return t("projection.step.createIndependentFile");
     if (action === "detachManagedInclude") return t("projection.step.detachManagedInclude");
@@ -76,6 +77,12 @@ export function ProjectionRail({
     statusTone = "danger";
     statusTitle = t("projection.blockedTitle");
     statusBody = t("projection.blockedBody");
+  } else if (plan && plan.confirmationCount > 0) {
+    statusTone = "attention";
+    statusTitle = t("projection.backupConfirmationTitle", {
+      count: plan.confirmationCount,
+    });
+    statusBody = t("projection.backupConfirmationBody");
   } else if (plan && plan.changeCount > 0) {
     statusTone = "attention";
     statusTitle = t("projection.connectionChangesReady", { count: plan.changeCount });
@@ -93,6 +100,7 @@ export function ProjectionRail({
     statusTitle = t("projection.noneDetectedTitle");
     statusBody = t("projection.noneDetectedBody");
   }
+  const confirmationNeedsBackup = (plan?.confirmationCount ?? 0) > 0;
 
   return (
     <section className="projection-panel" aria-labelledby="projection-heading">
@@ -215,18 +223,26 @@ export function ProjectionRail({
         <ConfirmDialog
           title={plan.blocked
             ? t("projection.blockedTitle")
-            : t("projection.connectionChangesReady", { count: plan.changeCount })}
+            : confirmationNeedsBackup
+              ? t("projection.backupConfirmationTitle", { count: plan.confirmationCount })
+              : t("projection.connectionChangesReady", { count: plan.changeCount })}
           description={plan.blocked
             ? t("projection.blockedBody")
-            : t("projection.connectionChangesBody")}
+            : confirmationNeedsBackup
+              ? t("projection.backupConfirmationBody")
+              : t("projection.connectionChangesBody")}
           tone={plan.blocked ? "danger" : "default"}
           blocked={plan.blocked || plan.changeCount === 0}
           confirming={applying}
           confirmLabel={plan.blocked || plan.changeCount === 0
             ? undefined
-            : plan.changeCount === 1
-              ? t("projection.applyOne")
-              : t("projection.applyMany", { count: plan.changeCount })}
+            : confirmationNeedsBackup
+              ? plan.changeCount === 1
+                ? t("projection.backupAndApplyOne")
+                : t("projection.backupAndApplyMany", { count: plan.changeCount })
+              : plan.changeCount === 1
+                ? t("projection.applyOne")
+                : t("projection.applyMany", { count: plan.changeCount })}
           cancelLabel={plan.blocked || plan.changeCount === 0 ? t("libraryPlan.close") : undefined}
           note={plan.blocked || plan.changeCount === 0
             ? t("libraryPlan.noChanges")

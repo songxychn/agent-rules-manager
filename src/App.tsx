@@ -180,11 +180,16 @@ function App() {
     if (!changes.length) return;
     setBusy("applying");
     try {
-      const outcome = await backend.apply(changes, libraryRoot);
+      const outcome = await backend.apply(changes, plan.confirmationCount > 0, libraryRoot);
       setNotice({
         tone: "success",
         message: outcome.changed.length
-          ? t("notice.applied", { agents: outcome.changed.join(", ") })
+          ? outcome.preservedBackupDir
+            ? t("notice.appliedWithBackup", {
+                agents: outcome.changed.join(", "),
+                path: outcome.preservedBackupDir,
+              })
+            : t("notice.applied", { agents: outcome.changed.join(", ") })
           : t("notice.aligned"),
       });
       await loadSnapshot(libraryRoot);

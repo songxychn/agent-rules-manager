@@ -203,9 +203,10 @@ fn apply_rules(
     app: AppHandle,
     library_root: Option<String>,
     changes: Vec<ConnectionChange>,
+    confirm_existing_files: bool,
 ) -> Result<ApplyOutcome, String> {
     build_manager(&app, library_root)?
-        .apply_connections(&changes)
+        .apply_connections_confirmed(&changes, confirm_existing_files)
         .map_err(|error| error.to_string())
 }
 

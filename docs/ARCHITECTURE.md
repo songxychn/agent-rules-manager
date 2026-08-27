@@ -81,10 +81,11 @@ Only a missing `current` entry or a symlink resolving inside this library's `.ru
 
 An adapter declares an id, label, native target path, command names, and configuration markers. Detection accepts a command on `PATH` or an existing marker because GUI processes often inherit a reduced `PATH`.
 
-- Connecting may create a symlink only when the target is missing or already recognized as managed.
-- A regular native file is a valid independent state and is never overwritten by connection apply.
+- Connecting may create a symlink directly when the target is missing or already recognized as managed.
+- A regular native file remains a valid independent state. Connecting it requires an explicit takeover confirmation; the complete original is first preserved as a readable file under application-state `backups/originals/<snapshot-id>/`, then the native path is replaced.
 - Disconnecting a managed link materializes the current Profile content as an independent regular file.
-- A legacy managed include is recognized only for safe detach or migration; malformed markers are never guessed at.
+- A legacy managed include is recognized for safe detach or migration. A regular file with mixed or malformed markers can only use the same confirmed whole-file backup takeover; its contents are never guessed at or partially rewritten.
+- A foreign symbolic link and every unsupported filesystem entry remain hard conflicts.
 
 Every adapter must inspect without reading authentication data, derive a complete desired state before mutation, verify its write, and restore only when the target still equals the expected applied or original state.
 
@@ -93,9 +94,9 @@ Every adapter must inspect without reading authentication data, derive a complet
 Library mutations and native projections use optimistic, fail-closed transactions:
 
 1. validate ids and current model;
-2. produce a complete preview and reject conflicts before writing;
+2. produce a complete preview, mark regular-file takeovers for explicit confirmation, and reject non-takeover conflicts before writing;
 3. re-read every target's original state;
-4. persist originals, desired digests, and directories that do not yet exist;
+4. persist originals, desired digests, directories that do not yet exist, and readable copies of confirmed takeover files;
 5. apply each target and verify its exact state;
 6. on failure, restore completed targets that still equal the expected state;
 7. retain the snapshot for explicit rollback.
