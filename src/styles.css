@@ -121,32 +121,6 @@ code {
   width: 38px;
   height: 38px;
   flex: 0 0 auto;
-  color: var(--mint);
-  overflow: visible;
-}
-
-.logo-mark-back {
-  fill: #c9f1e4;
-  stroke: none;
-}
-
-.logo-mark-front {
-  fill: #fff;
-  stroke: currentColor;
-  stroke-width: 1.7;
-}
-
-.logo-mark-route {
-  fill: none;
-  stroke: #59616a;
-  stroke-linecap: round;
-  stroke-width: 1.7;
-}
-
-.logo-mark-port {
-  fill: currentColor;
-  stroke: #fff;
-  stroke-width: 1.2;
 }
 
 .brand-lockup div {

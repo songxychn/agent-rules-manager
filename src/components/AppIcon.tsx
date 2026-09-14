@@ -1,13 +1,10 @@
+import brandMark from "../../assets/icon-source.svg?no-inline";
+
 type AppIconName = "control" | "profiles" | "settings" | "folder" | "rollback" | "bell";
 
 export function BrandMark() {
   return (
-    <svg className="logo-mark" viewBox="0 0 40 40" aria-hidden="true">
-      <path className="logo-mark-back" d="M6.5 10.5A3.5 3.5 0 0 1 10 7h17.5A3.5 3.5 0 0 1 31 10.5V28a3.5 3.5 0 0 1-3.5 3.5H10A3.5 3.5 0 0 1 6.5 28Z" />
-      <path className="logo-mark-front" d="M12 6.5h18A3.5 3.5 0 0 1 33.5 10v20A3.5 3.5 0 0 1 30 33.5H12A3.5 3.5 0 0 1 8.5 30V10A3.5 3.5 0 0 1 12 6.5Z" />
-      <path className="logo-mark-route" d="M14 14h10.5M14 20h7m-7 6h11" />
-      <circle className="logo-mark-port" cx="27.5" cy="20" r="2.5" />
-    </svg>
+    <img className="logo-mark" src={brandMark} alt="" aria-hidden="true" />
   );
 }
 
