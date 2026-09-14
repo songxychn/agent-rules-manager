@@ -1,0 +1,106 @@
+{
+  "retrievedOn": "2026-09-15",
+  "modifications": "SVG artwork is unchanged. terminal.svg uses LF instead of upstream CRLF; all other files retain original bytes.",
+  "files": [
+    {
+      "file": "vscode.svg",
+      "url": "https://raw.githubusercontent.com/devicons/devicon/v2.17.0/icons/vscode/vscode-original.svg",
+      "source": "Devicon",
+      "license": "MIT",
+      "sha256": "503d580c442a7071aae180d9b4766e312e4600bf0e9d842b30f56d0e614eceb8"
+    },
+    {
+      "file": "intellij-idea.svg",
+      "url": "https://raw.githubusercontent.com/devicons/devicon/v2.17.0/icons/intellij/intellij-original.svg",
+      "source": "Devicon",
+      "license": "MIT",
+      "sha256": "7ce573a86bc3e352295b8df8a09e1136700297e0add359f9d4d7e3aec77bc65f"
+    },
+    {
+      "file": "rider.svg",
+      "url": "https://raw.githubusercontent.com/devicons/devicon/v2.17.0/icons/rider/rider-original.svg",
+      "source": "Devicon",
+      "license": "MIT",
+      "sha256": "768dc8b8cbc5eb40758e0ee7616ec92d66209d4b5d7fcb48f2ea788684e17217"
+    },
+    {
+      "file": "webstorm.svg",
+      "url": "https://raw.githubusercontent.com/devicons/devicon/v2.17.0/icons/webstorm/webstorm-original.svg",
+      "source": "Devicon",
+      "license": "MIT",
+      "sha256": "64d2b0f3db1b1f72f7eb28bb7e6957f79efa81ce24ae532ba616e34798e6058a"
+    },
+    {
+      "file": "cursor.svg",
+      "url": "https://raw.githubusercontent.com/lobehub/lobe-icons/a94750e3f5f8fc33757b839d85030e742284e43a/packages/static-svg/icons/cursor.svg",
+      "source": "Lobe Icons",
+      "license": "MIT",
+      "sha256": "0cb51bddf264ae108926fd554c063ef40fc1aac3c5c921ddb39ad184e4e5d0ef"
+    },
+    {
+      "file": "default.svg",
+      "url": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/9cf8af0f95a555918a60b8147a2f33a6a1248442/assets/Document/SVG/ic_fluent_document_24_color.svg",
+      "source": "Fluent UI System Icons",
+      "license": "MIT",
+      "sha256": "3219a365c3b637a5ae5f695ee541189236e8780696507e78a811bd3684eee5ee"
+    },
+    {
+      "file": "typora.svg",
+      "url": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/9cf8af0f95a555918a60b8147a2f33a6a1248442/assets/Document%20Edit/SVG/ic_fluent_document_edit_24_color.svg",
+      "source": "Fluent UI System Icons",
+      "license": "MIT",
+      "sha256": "f700fc5e71212724b8cc447fc458bbbcdebee23bde60dff7606dffa14e57e388"
+    },
+    {
+      "file": "textedit.svg",
+      "url": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/9cf8af0f95a555918a60b8147a2f33a6a1248442/assets/Text%20Edit%20Style/SVG/ic_fluent_text_edit_style_24_color.svg",
+      "source": "Fluent UI System Icons",
+      "license": "MIT",
+      "sha256": "202d1349f81d1912e9547cf7de82bc888770251b2763040696b1df8a4be35f66"
+    },
+    {
+      "file": "finder.svg",
+      "url": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/9cf8af0f95a555918a60b8147a2f33a6a1248442/assets/Document%20Folder/SVG/ic_fluent_document_folder_24_color.svg",
+      "source": "Fluent UI System Icons",
+      "license": "MIT",
+      "sha256": "06f76f631718174c6bdafb0c6609166ddb78092ce55ab9b7bba272cd827ca14d"
+    },
+    {
+      "file": "terminal.svg",
+      "url": "https://raw.githubusercontent.com/icons8/flat-color-icons/1bf90d5ff118bc6690120ff9fdfe234565b7e414/svg/command_line.svg",
+      "source": "Icons8 Flat Color Icons",
+      "license": "MIT (dual-license option)",
+      "sha256": "ec0d3cfa8eb2b9efdf167a10aa69e7b0af00f5f481c085d9d32eb83344652ddd",
+      "upstreamSha256": "64a6fce8e587fd3b460abf6b075ca4f9b707988d271e66c4b44a3f850d76e5b2",
+      "modifications": "CRLF line endings normalized to LF."
+    },
+    {
+      "file": "licenses/devicon-MIT.txt",
+      "url": "https://raw.githubusercontent.com/devicons/devicon/v2.17.0/LICENSE",
+      "source": "Devicon",
+      "license": "MIT",
+      "sha256": "121194741d4a915b9f5890fdd6dd95121f9b1f816517c792358d72d7c838d664"
+    },
+    {
+      "file": "licenses/lobe-icons-MIT.txt",
+      "url": "https://raw.githubusercontent.com/lobehub/lobe-icons/a94750e3f5f8fc33757b839d85030e742284e43a/LICENSE",
+      "source": "Lobe Icons",
+      "license": "MIT",
+      "sha256": "add9d7531d1b21646317a8958e38fc727506fa39d24bdecb44154d943c82753a"
+    },
+    {
+      "file": "licenses/fluentui-MIT.txt",
+      "url": "https://raw.githubusercontent.com/microsoft/fluentui-system-icons/9cf8af0f95a555918a60b8147a2f33a6a1248442/LICENSE",
+      "source": "Fluent UI System Icons",
+      "license": "MIT",
+      "sha256": "69bc45dc42b9acb96a69823adbc6ae538374e3c0bde169b855b32c48eaaef52f"
+    },
+    {
+      "file": "licenses/flat-color-icons.md",
+      "url": "https://raw.githubusercontent.com/icons8/flat-color-icons/1bf90d5ff118bc6690120ff9fdfe234565b7e414/LICENSE.md",
+      "source": "Icons8 Flat Color Icons",
+      "license": "MIT (dual-license option)",
+      "sha256": "0c029819d69e43042904a3e9d12d25934d08398ba739e4364d61519aa1c2711c"
+    }
+  ]
+}

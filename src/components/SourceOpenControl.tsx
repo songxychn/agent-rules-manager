@@ -2,16 +2,16 @@ import { useEffect, useRef, useState } from "react";
 import { resolveOpenTarget } from "../lib/openTargets";
 import type { OpenTarget } from "../lib/types";
 import { useI18n } from "../lib/i18n";
-import cursorIcon from "../assets/open-target-icons/cursor.png";
-import defaultIcon from "../assets/open-target-icons/default.png";
-import finderIcon from "../assets/open-target-icons/finder.png";
-import intellijIdeaIcon from "../assets/open-target-icons/intellij-idea.png";
-import riderIcon from "../assets/open-target-icons/rider.png";
-import terminalIcon from "../assets/open-target-icons/terminal.png";
-import textEditIcon from "../assets/open-target-icons/textedit.png";
-import typoraIcon from "../assets/open-target-icons/typora.png";
-import vscodeIcon from "../assets/open-target-icons/vscode.png";
-import webstormIcon from "../assets/open-target-icons/webstorm.png";
+import defaultIcon from "../assets/open-target-icons/default.svg?no-inline";
+import vscodeIcon from "../assets/open-target-icons/vscode.svg?no-inline";
+import cursorIcon from "../assets/open-target-icons/cursor.svg?no-inline";
+import typoraIcon from "../assets/open-target-icons/typora.svg?no-inline";
+import texteditIcon from "../assets/open-target-icons/textedit.svg?no-inline";
+import intellijIdeaIcon from "../assets/open-target-icons/intellij-idea.svg?no-inline";
+import riderIcon from "../assets/open-target-icons/rider.svg?no-inline";
+import webstormIcon from "../assets/open-target-icons/webstorm.svg?no-inline";
+import finderIcon from "../assets/open-target-icons/finder.svg?no-inline";
+import terminalIcon from "../assets/open-target-icons/terminal.svg?no-inline";
 
 interface SourceOpenControlProps {
   fileName: string;
@@ -27,7 +27,7 @@ const iconSources: Record<string, string> = {
   vscode: vscodeIcon,
   cursor: cursorIcon,
   typora: typoraIcon,
-  textedit: textEditIcon,
+  textedit: texteditIcon,
   "intellij-idea": intellijIdeaIcon,
   rider: riderIcon,
   webstorm: webstormIcon,
@@ -35,11 +35,11 @@ const iconSources: Record<string, string> = {
   terminal: terminalIcon,
 };
 
-function OpenTargetIcon({ target }: { target: OpenTarget }) {
+function OpenTargetIcon({ targetId = "default" }: { targetId?: string }) {
   return (
     <img
       className="open-target-icon"
-      src={iconSources[target.id] ?? defaultIcon}
+      src={iconSources[targetId] ?? defaultIcon}
       alt=""
       aria-hidden="true"
       draggable={false}
@@ -109,7 +109,7 @@ export function SourceOpenControl({
         aria-checked={selected}
         onClick={() => chooseTarget(target)}
       >
-        <OpenTargetIcon target={target} />
+        <OpenTargetIcon targetId={target.id} />
         <span>{targetLabel(target)}</span>
       </button>
     );
@@ -127,17 +127,11 @@ export function SourceOpenControl({
         >
           {activeTarget ? (
             <>
-              <OpenTargetIcon target={activeTarget} />
+              <OpenTargetIcon targetId={activeTarget.id} />
               <span>{actionLabel}</span>
             </>
           ) : (
-            <img
-              className="open-target-icon"
-              src={defaultIcon}
-              alt=""
-              aria-hidden="true"
-              draggable={false}
-            />
+            <OpenTargetIcon />
           )}
         </button>
         <button
