@@ -12,14 +12,12 @@ import type {
   RuntimeState,
 } from "../lib/types";
 import { useI18n } from "../lib/i18n";
-import { ConfirmDialog } from "./ConfirmDialog";
 import { LibraryChangeConfirm } from "./LibraryChangeConfirm";
 import { SourceOpenControl } from "./SourceOpenControl";
 
 interface ProfilesPageProps {
   profiles: ProfileSummary[];
   runtimeState: RuntimeState;
-  latestLibraryBackup?: string;
   openTargets: OpenTarget[];
   preferredOpenTargetId: string;
   openingTargetId?: string;
@@ -30,7 +28,7 @@ interface ProfilesPageProps {
   onDelete: (profileId: string) => Promise<void>;
   onPrepareActivate: (profileId: string) => Promise<LibraryPlan>;
   onActivate: (profileId: string) => Promise<void>;
-  onRollback: () => Promise<void>;
+  onHistory: () => void;
   onError: (message: string) => void;
 }
 
@@ -39,7 +37,6 @@ const emptyDraft: ProfileDraft = { id: "", name: "", description: "" };
 export function ProfilesPage({
   profiles,
   runtimeState,
-  latestLibraryBackup,
   openTargets,
   preferredOpenTargetId,
   openingTargetId,
@@ -50,7 +47,7 @@ export function ProfilesPage({
   onDelete,
   onPrepareActivate,
   onActivate,
-  onRollback,
+  onHistory,
   onError,
 }: ProfilesPageProps) {
   const { t } = useI18n();
@@ -60,7 +57,6 @@ export function ProfilesPage({
   const [deletion, setDeletion] = useState<{ profileId: string; plan: LibraryPlan }>();
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
-  const [rollbackArmed, setRollbackArmed] = useState(false);
   const [createOpen, setCreateOpen] = useState(false);
   const createTriggerRef = useRef<HTMLButtonElement>(null);
   const createDialogRef = useRef<HTMLElement>(null);
@@ -165,11 +161,6 @@ export function ProfilesPage({
       setDeletion(undefined);
     });
 
-  const rollback = () =>
-    run("rollback", async () => {
-      await onRollback();
-      setRollbackArmed(false);
-    });
 
   return (
     <div className="library-page profiles-page">
@@ -205,25 +196,13 @@ export function ProfilesPage({
           </button>
           <button
             className="button button-ghost button-small"
-            disabled={!latestLibraryBackup || Boolean(busy)}
-            onClick={() => setRollbackArmed(true)}
+            disabled={Boolean(busy)}
+            onClick={onHistory}
           >
-            {t("profiles.rollback")}
+            {t("nav.history")}
           </button>
         </div>
       </div>
-
-      {rollbackArmed && (
-        <ConfirmDialog
-          title={t("profiles.rollbackQuestion")}
-          description={t("profiles.rollbackPrompt", { id: latestLibraryBackup ?? "—" })}
-          confirming={busy === "rollback"}
-          confirmLabel={t("profiles.rollbackConfirm")}
-          note={t("profiles.rollbackNote")}
-          onCancel={() => setRollbackArmed(false)}
-          onConfirm={() => void rollback()}
-        />
-      )}
 
       <div className="library-page-grid">
         <section className="profile-patch-sheet" aria-label={t("profiles.listLabel")}>

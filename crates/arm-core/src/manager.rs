@@ -24,7 +24,7 @@ pub struct RulesManager {
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(tag = "kind", rename_all = "camelCase")]
-enum FileState {
+pub(crate) enum FileState {
     Missing,
     File { content: String },
     Symlink { target: String },
@@ -43,6 +43,10 @@ struct BackupEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BackupSnapshot {
+    #[serde(default)]
+    history_epoch: String,
+    #[serde(default)]
+    subjects: Vec<String>,
     id: String,
     created_at: String,
     entries: Vec<BackupEntry>,
@@ -121,6 +125,7 @@ impl RulesManager {
     }
 
     pub fn initialize(&self) -> Result<LibraryMutationOutcome, ArmError> {
+        let _guard = crate::history::MutationGuard::acquire(&self.state_root)?;
         library::initialize(&self.library_root, &self.state_root)
     }
 
@@ -139,6 +144,7 @@ impl RulesManager {
         name: &str,
         description: &str,
     ) -> Result<LibraryMutationOutcome, ArmError> {
+        let _guard = crate::history::MutationGuard::acquire(&self.state_root)?;
         library::create_profile(&self.library_root, &self.state_root, id, name, description)
     }
 
@@ -147,6 +153,7 @@ impl RulesManager {
     }
 
     pub fn delete_profile(&self, profile_id: &str) -> Result<LibraryMutationOutcome, ArmError> {
+        let _guard = crate::history::MutationGuard::acquire(&self.state_root)?;
         library::delete_profile(&self.library_root, &self.state_root, profile_id)
     }
 
@@ -155,6 +162,7 @@ impl RulesManager {
     }
 
     pub fn activate_profile(&self, profile_id: &str) -> Result<LibraryMutationOutcome, ArmError> {
+        let _guard = crate::history::MutationGuard::acquire(&self.state_root)?;
         library::activate_profile(&self.library_root, &self.state_root, profile_id)
     }
 
@@ -167,7 +175,24 @@ impl RulesManager {
     }
 
     pub fn rollback_library_latest(&self) -> Result<RollbackOutcome, ArmError> {
+        let _guard = crate::history::MutationGuard::acquire(&self.state_root)?;
         library::rollback_library_latest(&self.state_root)
+    }
+
+    pub fn operation_history(&self) -> Result<Vec<crate::HistoryRecord>, ArmError> {
+        crate::history::list(&self.state_root)
+    }
+
+    pub fn preview_restore(&self, target_id: &str) -> Result<crate::RestorePlan, ArmError> {
+        crate::history::preview(&self.state_root, target_id)
+    }
+
+    pub fn restore_history(
+        &self,
+        target_id: &str,
+        token: &str,
+    ) -> Result<RollbackOutcome, ArmError> {
+        crate::history::restore(&self.state_root, target_id, token)
     }
 
     pub fn snapshot(&self) -> Result<WorkspaceSnapshot, ArmError> {
@@ -391,6 +416,7 @@ impl RulesManager {
         changes: &[ConnectionChange],
         confirm_existing_files: bool,
     ) -> Result<ApplyOutcome, ArmError> {
+        let _guard = crate::history::MutationGuard::acquire(&self.state_root)?;
         let source = self.source_path();
         let metadata = fs::metadata(&source)
             .map_err(|error| ArmError::io(source.display().to_string(), error))?;
@@ -457,6 +483,24 @@ impl RulesManager {
             });
         }
         let backup = BackupSnapshot {
+            history_epoch: crate::history::archive_epoch(&self.state_root)?,
+            subjects: prepared
+                .iter()
+                .map(|change| {
+                    let label = self
+                        .adapters
+                        .iter()
+                        .find(|a| a.id == change.agent_id)
+                        .map(|a| a.label.as_str())
+                        .unwrap_or(&change.agent_id);
+                    let action = if matches!(change.desired, FileState::Symlink { .. }) {
+                        "connect"
+                    } else {
+                        "disconnect"
+                    };
+                    format!("{action}:{label}")
+                })
+                .collect(),
             id: backup_id.clone(),
             created_at: Utc::now().to_rfc3339(),
             entries: prepared
@@ -530,6 +574,7 @@ impl RulesManager {
     }
 
     pub fn rollback_latest(&self) -> Result<RollbackOutcome, ArmError> {
+        let _guard = crate::history::MutationGuard::acquire(&self.state_root)?;
         let backup_path = self.latest_backup_path()?.ok_or(ArmError::NoBackup)?;
         let data = fs::read_to_string(&backup_path)
             .map_err(|error| ArmError::io(backup_path.display().to_string(), error))?;
@@ -999,7 +1044,7 @@ fn legacy_include_is_only_managed_content(state: &FileState) -> bool {
 }
 
 /// Project instruction directories may not redirect a write outside the chosen root.
-fn validate_project_boundary(path: &Path, root: Option<&Path>) -> Result<(), ArmError> {
+pub(crate) fn validate_project_boundary(path: &Path, root: Option<&Path>) -> Result<(), ArmError> {
     let Some(root) = root else {
         return Ok(());
     };
@@ -1166,7 +1211,7 @@ fn include_block(source: &Path) -> String {
     format!("{INCLUDE_START}\n@{}\n{INCLUDE_END}", source.display())
 }
 
-fn read_file_state(path: &Path) -> Result<FileState, ArmError> {
+pub(crate) fn read_file_state(path: &Path) -> Result<FileState, ArmError> {
     let metadata = match fs::symlink_metadata(path) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -1189,7 +1234,7 @@ fn read_file_state(path: &Path) -> Result<FileState, ArmError> {
     Err(ArmError::UnsupportedEntry(path.display().to_string()))
 }
 
-fn restore_file_state(path: &Path, state: &FileState) -> Result<(), ArmError> {
+pub(crate) fn restore_file_state(path: &Path, state: &FileState) -> Result<(), ArmError> {
     if fs::symlink_metadata(path).is_ok() {
         fs::remove_file(path).map_err(|error| ArmError::io(path.display().to_string(), error))?;
     }
@@ -1240,7 +1285,7 @@ fn create_symlink(source: &Path, target: &Path) -> Result<(), ArmError> {
         .map_err(|error| ArmError::io(target.display().to_string(), error))
 }
 
-fn file_state_digest(state: &FileState) -> Result<String, ArmError> {
+pub(crate) fn file_state_digest(state: &FileState) -> Result<String, ArmError> {
     let bytes = serde_json::to_vec(state)?;
     let digest = Sha256::digest(bytes);
     Ok(format!("{digest:x}"))
