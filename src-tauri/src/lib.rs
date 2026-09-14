@@ -204,12 +204,48 @@ fn rollback_library_latest(
         .map_err(|error| error.to_string())
 }
 
+#[tauri::command]
+fn get_operation_history(
+    app: AppHandle,
+    library_root: Option<String>,
+) -> Result<Vec<arm_core::HistoryRecord>, String> {
+    build_manager(&app, library_root)?
+        .operation_history()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn preview_restore_history(
+    app: AppHandle,
+    library_root: Option<String>,
+    target_id: String,
+) -> Result<arm_core::RestorePlan, String> {
+    build_manager(&app, library_root)?
+        .preview_restore(&target_id)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+fn restore_history(
+    app: AppHandle,
+    library_root: Option<String>,
+    target_id: String,
+    token: String,
+) -> Result<RollbackOutcome, String> {
+    build_manager(&app, library_root)?
+        .restore_history(&target_id, &token)
+        .map_err(|e| e.to_string())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .invoke_handler(tauri::generate_handler![
             get_workspace_snapshot,
+            get_operation_history,
+            preview_restore_history,
+            restore_history,
             preview_initialize,
             initialize_library,
             preview_create_profile,

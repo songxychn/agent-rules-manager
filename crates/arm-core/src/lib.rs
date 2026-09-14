@@ -1,3 +1,5 @@
+mod history;
+pub use history::{HistoryRecord, RestorePlan, RestoreStep};
 mod adapters;
 mod library;
 mod manager;

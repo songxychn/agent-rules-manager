@@ -201,6 +201,10 @@ struct BackupEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct BackupSnapshot {
+    #[serde(default)]
+    history_epoch: String,
+    #[serde(default)]
+    subjects: Vec<String>,
     id: String,
     created_at: String,
     operation: String,
@@ -2402,6 +2406,28 @@ fn apply_changes(
     let created_directories = collect_missing_parent_directories(&changes)?;
     let backup_id = Utc::now().format("%Y%m%dT%H%M%S%.9fZ").to_string();
     let backup = BackupSnapshot {
+        history_epoch: crate::history::archive_epoch(state_root)?,
+        subjects: changes
+            .iter()
+            .filter_map(|change| {
+                let state = if matches!(change.desired, FileState::Missing) {
+                    &change.original
+                } else {
+                    &change.desired
+                };
+                let FileState::File { content } = state else {
+                    return None;
+                };
+                let value: serde_json::Value = serde_json::from_str(content).ok()?;
+                if change.path.file_name()?.to_str()? == MACHINE_FILE {
+                    value.get("activeProfileId")?.as_str().map(String::from)
+                } else if change.path.file_name()?.to_str()? == PROFILE_MANIFEST_FILE {
+                    value.get("name")?.as_str().map(String::from)
+                } else {
+                    None
+                }
+            })
+            .collect(),
         id: backup_id.clone(),
         created_at: Utc::now().to_rfc3339(),
         operation: operation.into(),

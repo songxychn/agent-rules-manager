@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppIcon, BrandMark } from "./components/AppIcon";
 import { LibrarySetupPanel } from "./components/LibrarySetupPanel";
+import { HistoryPage } from "./components/HistoryPage";
 import { ProfilesPage } from "./components/ProfilesPage";
 import { AgentScopePanel } from "./components/AgentScopePanel";
 import { ProjectionRail } from "./components/ProjectionRail";
@@ -20,7 +21,7 @@ import type {
 } from "./lib/types";
 import "./styles.css";
 
-type View = "control" | "profiles" | "settings";
+type View = "control" | "profiles" | "history" | "settings";
 
 function workspaceFingerprint(snapshot: WorkspaceSnapshot | undefined): string {
   if (!snapshot) return "";
@@ -208,19 +209,6 @@ function App() {
     }
   };
 
-  const rollbackProjection = async () => {
-    setBusy("rollback");
-    try {
-      const outcome = await backend.rollback(libraryRoot);
-      notify({ tone: "success", message: t("notice.restored", { id: outcome.backupId }) });
-      await loadSnapshot(libraryRoot);
-    } catch (error) {
-      notify({ tone: "error", message: String(error) });
-    } finally {
-      setBusy(undefined);
-    }
-  };
-
   const prepareInitializeConfirmation = async () => {
     setBusy("planning-library");
     try {
@@ -292,12 +280,6 @@ function App() {
     notify({ tone: "success", message: t("notice.profileActivated", { id: profileId }) });
   };
 
-  const rollbackLibrary = async () => {
-    const outcome = await backend.rollbackLibrary(libraryRoot);
-    await loadSnapshot(libraryRoot);
-    notify({ tone: "success", message: t("notice.libraryRestored", { id: outcome.backupId }) });
-  };
-
   if (!snapshot) {
     return (
       <main className="loading-screen">
@@ -321,13 +303,13 @@ function App() {
         : undefined;
 
   const renderReadyView = () => {
+    if (view === "history") return <HistoryPage key={libraryRoot} libraryRoot={libraryRoot} onRestored={() => loadSnapshot(libraryRoot)} />;
     if (view === "settings") return <SettingsPage />;
     if (view === "profiles") {
       return (
         <ProfilesPage
           profiles={snapshot.profiles}
           runtimeState={snapshot.runtimeState}
-          latestLibraryBackup={snapshot.latestLibraryBackup}
           openTargets={openTargets}
           preferredOpenTargetId={preferredOpenTarget}
           openingTargetId={openingTargetId}
@@ -339,7 +321,7 @@ function App() {
           onDelete={deleteProfile}
           onPrepareActivate={(profileId) => backend.previewActivateProfile(profileId, libraryRoot)}
           onActivate={activateProfile}
-          onRollback={rollbackLibrary}
+          onHistory={() => setView("history")}
           onError={(message) => notify({ tone: "error", message })}
         />
       );
@@ -413,14 +395,14 @@ function App() {
         </div>
 
         <div className="nav-primary">
-          {(["control", "profiles"] as const).map((item) => (
+          {(["control", "profiles", "history"] as const).map((item) => (
             <button
               className={`nav-item ${view === item ? "is-active" : ""}`}
               aria-current={view === item ? "page" : undefined}
               onClick={() => setView(item)}
               key={item}
             >
-              <span className="nav-icon"><AppIcon name={item} /></span>
+              <span className="nav-icon"><AppIcon name={item === "history" ? "rollback" : item} /></span>
               {t(`nav.${item}` as "nav.control")}
             </button>
           ))}
@@ -483,20 +465,15 @@ function App() {
             <NotificationCenter {...notifications} />
             {!backend.isTauri && <span className="runtime-badge">{t("runtime.demo")}</span>}
             {view === "control" && (
-              <button
-                className="button button-ghost button-small"
-                disabled={!snapshot.latestBackup || Boolean(busy)}
-                onClick={() => void rollbackProjection()}
-              >
-                <AppIcon name="rollback" />
-                {busy === "rollback" ? t("rollback.restoring") : t("rollback.latest")}
+              <button className="button button-ghost button-small" disabled={Boolean(busy)} onClick={() => setView("history")}>
+                <AppIcon name="rollback" />{t("nav.history")}
               </button>
             )}
           </div>
         </header>
 
         <main className="workspace">
-          {snapshot.libraryState !== "ready" && view !== "settings" ? (
+          {snapshot.libraryState !== "ready" && view !== "settings" && view !== "history" ? (
             <LibrarySetupPanel
               state={snapshot.libraryState}
               detail={snapshot.libraryDetail}

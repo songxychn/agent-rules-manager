@@ -1,6 +1,9 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
   ApplyOutcome,
+  HistoryRecord,
+  RestorePlan,
+  RestoreStep,
   ConnectionChange,
   LibraryMutationOutcome,
   LibraryPlan,
@@ -138,6 +141,65 @@ let demoLibraryRollbackSnapshot: WorkspaceSnapshot | undefined;
 let demoLibraryRollbackPaths: string[] | undefined;
 let demoLibraryRollbackId: string | undefined;
 
+type DemoPoint = { record: HistoryRecord; snapshot: WorkspaceSnapshot; projects: [string, WorkspaceSnapshot["agents"]][] };
+const demoHistory: DemoPoint[] = [];
+let demoHistorySequence = 0;
+function recordDemo(operation: string, subjects: string[], paths: string[], scope: HistoryRecord["scope"] = "profiles") {
+  const record: HistoryRecord = {
+    id: `demo-history-${++demoHistorySequence}`, createdAt: new Date().toISOString(), operation, subjects, paths, scope, restorable: true,
+  };
+  demoHistory.push({ record, snapshot: structuredClone(demoSnapshot), projects: structuredClone([...demoProjects]) });
+}
+// Explicit browser-only sample history; no native files are inspected or changed.
+const demoInitial = structuredClone(demoSnapshot);
+demoSnapshot.profiles = demoSnapshot.profiles.filter((p) => p.id === "default").map((p) => ({ ...p, isActive: true }));
+demoSnapshot.activeProfileId = "default";
+const demoStart = structuredClone(demoSnapshot);
+demoSnapshot = { ...demoSnapshot, libraryState: "empty", profiles: [], activeProfileId: undefined, activeSourcePath: undefined, runtimeState: "missing", sourceExists: false, agents: demoSnapshot.agents.map((a) => ({ ...a, connected: false, targetKind: "missing", state: "ready" })) };
+recordDemo("historyBaseline", [], [], "recovery");
+demoSnapshot = demoStart;
+recordDemo("initialize", ["Default"], [`${demoRoot}/profiles/default/AGENTS.md`]);
+for (const profile of demoInitial.profiles.filter((p) => p.id !== "default")) {
+  demoSnapshot.profiles.push({ ...profile, isActive: false });
+  recordDemo("createProfile", [profile.name], [`${demoRoot}/profiles/${profile.id}/AGENTS.md`]);
+}
+demoSnapshot = demoInitial;
+recordDemo("activateProfile", ["Work machine"], [`${demoRoot}/current`]);
+for (let i = 0; i < demoHistory.length; i++) demoHistory[i].record.createdAt = new Date(Date.now() - (demoHistory.length - i) * 3600000).toISOString();
+
+function demoRestorePlan(targetId: string): RestorePlan {
+  const index = demoHistory.findIndex((point) => point.record.id === targetId);
+  if (index < 0) throw new Error("Unknown recovery point");
+  const target = demoHistory[index];
+  const steps: RestoreStep[] = [];
+  const add = (path: string, before: string, after: string) => {
+    if (before !== after) steps.push({ path, before, after, action: after === "missing" ? "remove" : after.startsWith("link:") ? "restoreLink" : "restoreFile" });
+  };
+  add("<local state>/machine.json", `profile:${demoSnapshot.activeProfileId ?? "—"}`, `profile:${target.snapshot.activeProfileId ?? "—"}`);
+  const ids = new Set([...demoSnapshot.profiles, ...target.snapshot.profiles].map((p) => p.id));
+  for (const id of ids) {
+    const before = demoSnapshot.profiles.find((p) => p.id === id);
+    const after = target.snapshot.profiles.find((p) => p.id === id);
+    add(`${demoRoot}/profiles/${id}/AGENTS.md`, before ? "file" : "missing", after ? "file" : "missing");
+    add(`${demoRoot}/profiles/${id}/profile.json`, before ? "file" : "missing", after ? "file" : "missing");
+  }
+  const compareAgents = (before: WorkspaceSnapshot["agents"], after: WorkspaceSnapshot["agents"]) => {
+    for (const agent of before) {
+      const previous = after.find((a) => a.id === agent.id);
+      add(agent.targetPath, agent.connected ? `link:${demoRoot}/current/AGENTS.md` : agent.targetKind === "missing" ? "missing" : "file",
+        previous?.connected ? `link:${demoRoot}/current/AGENTS.md` : !previous || previous.targetKind === "missing" ? "missing" : "file");
+    }
+    for (const agent of after.filter((a) => !before.some((b) => a.id === b.id))) {
+      add(agent.targetPath, "missing", agent.connected ? `link:${demoRoot}/current/AGENTS.md` : agent.targetKind === "missing" ? "missing" : "file");
+    }
+  };
+  compareAgents(demoSnapshot.agents, target.snapshot.agents);
+  const beforeProjects = new Map(demoProjects), afterProjects = new Map(target.projects);
+  for (const root of new Set([...beforeProjects.keys(), ...afterProjects.keys()])) compareAgents(beforeProjects.get(root) ?? [], afterProjects.get(root) ?? []);
+  return { target: structuredClone(target.record), token: JSON.stringify([demoHistory.map((p) => p.record.id), demoSnapshot, [...demoProjects]]),
+    operations: demoHistory.slice(index + 1).map((p) => structuredClone(p.record)).reverse(), steps, conflicts: [], blocked: false };
+}
+
 const demoOpenTargets: OpenTarget[] = [
   { id: "default", label: "Default app", kind: "default" },
   { id: "vscode", label: "Visual Studio Code", kind: "editor" },
@@ -165,6 +227,25 @@ function mutation(paths: string[]): LibraryMutationOutcome {
 
 export const backend = {
   isTauri,
+  async history(libraryRoot?: string): Promise<HistoryRecord[]> {
+    if (isTauri) return invoke("get_operation_history", { libraryRoot });
+    return demoHistory.map((p) => structuredClone(p.record)).reverse();
+  },
+  async previewRestore(targetId: string, libraryRoot?: string): Promise<RestorePlan> {
+    if (isTauri) return invoke("preview_restore_history", { targetId, libraryRoot });
+    return demoRestorePlan(targetId);
+  },
+  async restoreHistory(targetId: string, token: string, libraryRoot?: string): Promise<RollbackOutcome> {
+    if (isTauri) return invoke("restore_history", { targetId, token, libraryRoot });
+    const plan = demoRestorePlan(targetId);
+    if (plan.token !== token || plan.blocked || !plan.steps.length) throw new Error("Recovery preview is stale or has no changes; preview again");
+    const target = demoHistory.find((p) => p.record.id === targetId)!;
+    demoSnapshot = structuredClone(target.snapshot);
+    demoProjects.clear();
+    for (const [root, agents] of structuredClone(target.projects)) demoProjects.set(root, agents);
+    recordDemo("restoreHistory", [target.record.createdAt], plan.steps.map((s) => s.path), "recovery");
+    return { restored: plan.steps.map((s) => s.path), backupId: demoHistory.at(-1)!.record.id };
+  },
   async snapshot(libraryRoot?: string, projectRoot?: string): Promise<WorkspaceSnapshot> {
     if (isTauri) return invoke("get_workspace_snapshot", { libraryRoot, projectRoot });
     return structuredClone(scopedDemo(projectRoot));
@@ -184,6 +265,7 @@ export const backend = {
   async initialize(libraryRoot?: string): Promise<LibraryMutationOutcome> {
     if (isTauri) return invoke("initialize_library", { libraryRoot });
     demoSnapshot.libraryState = "ready";
+    recordDemo("initialize", ["Default"], [`${demoRoot}/schema.json`]);
     return mutation([`${demoRoot}/schema.json`, `${demoRoot}/profiles/default/AGENTS.md`]);
   },
   async previewCreateProfile(draft: ProfileDraft, libraryRoot?: string): Promise<LibraryPlan> {
@@ -225,6 +307,7 @@ export const backend = {
       ...demoSnapshot.profiles,
       { ...draft, files: [{ path: "AGENTS.md", digest: "new000000000" }], isActive: false },
     ];
+    recordDemo("createProfile", [draft.name], [`${demoRoot}/profiles/${draft.id}/AGENTS.md`]);
     return mutation([
       `${demoRoot}/profiles/${draft.id}/profile.json`,
       `${demoRoot}/profiles/${draft.id}/AGENTS.md`,
@@ -281,6 +364,7 @@ export const backend = {
       profiles: demoSnapshot.profiles.filter((candidate) => candidate.id !== profileId),
       latestLibraryBackup: backupId,
     };
+    recordDemo("deleteProfile", [profile.name], changed);
     return { changed, backupId };
   },
   async previewActivateProfile(profileId: string, libraryRoot?: string): Promise<LibraryPlan> {
@@ -317,6 +401,7 @@ export const backend = {
         isActive: candidate.id === profileId,
       })),
     };
+    recordDemo("activateProfile", [profile.name], [`${demoRoot}/current`, "<local state>/machine.json"]);
     return mutation([`${demoRoot}/current`, "<local state>/machine.json"]);
   },
   async preview(changes: ConnectionChange[], libraryRoot?: string, projectRoot?: string): Promise<ProjectionPlan> {
@@ -398,6 +483,7 @@ export const backend = {
       if (projectRoot) demoProjects.set(projectRoot, next.agents);
       else demoSnapshot.agents = next.agents;
       demoSnapshot.latestBackup = "demo-apply-snapshot";
+      recordDemo("connectionChange", next.agents.filter((a) => changed.includes(a.id)).map((a) => `${a.connected ? "connect" : "disconnect"}:${a.label}`), next.agents.filter((a) => changed.includes(a.id)).map((a) => a.targetPath), "agents");
     }
     return {
       changed,

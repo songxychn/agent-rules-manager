@@ -128,3 +128,32 @@ export interface ProfileDraft {
   name: string;
   description: string;
 }
+
+export interface HistoryRecord {
+  id: string;
+  createdAt: string;
+  operation: string;
+  subjects: string[];
+  scope: "profiles" | "agents" | "recovery";
+  paths: string[];
+  restorable: boolean;
+  unavailableReason?: string | null;
+}
+
+export interface RestoreStep {
+  path: string;
+  action: string;
+  before: string;
+  after: string;
+  beforeContent?: string | null;
+  afterContent?: string | null;
+}
+
+export interface RestorePlan {
+  target: HistoryRecord;
+  token: string;
+  operations: HistoryRecord[];
+  steps: RestoreStep[];
+  conflicts: string[];
+  blocked: boolean;
+}
