@@ -67,6 +67,8 @@ current -> .runtime/work-8d9f20b751a4
 
 Adapters receive `<library>/current/AGENTS.md`, not a canonicalized Runtime path. Switching Profile changes `current` while native Agent links remain stable.
 
+Global and project projections share that machine selection. A project connection is a local link, not a per-project Profile selection or a portable team rules export.
+
 Only a missing `current` entry or a symlink resolving inside this library's `.runtime` directory is managed. A regular file, directory, or foreign symlink blocks activation. The active Profile id lives in machine-local application state, never in a syncable manifest.
 
 ## Adapter contract
@@ -111,7 +113,7 @@ Schema v1 is treated as an import format, not an active public abstraction:
 
 The WebView may request only a source declared by a known Profile, identified by `(profile_id, relative_path)`, plus a fixed open-target id returned by the backend. The core revalidates membership and the Tauri layer verifies a regular file before invoking a platform adapter. The WebView never submits an executable or arbitrary absolute path.
 
-Browser mode uses representative in-memory data. Create, append, remove a supplemental source, delete a Profile, activate, and rollback actions mutate only that snapshot.
+Browser mode uses representative in-memory data. Creating or deleting a Profile, activating, connecting or disconnecting an Agent, and rolling back mutate only that snapshot. Reloading the page resets the demonstration; no real configuration files or external editors are accessed.
 
 ## Multi-machine transport contract
 
@@ -127,7 +129,7 @@ It must exclude `.runtime/**`, `current`, all application state, native Agent pa
 ## Extension points
 
 - explicit Git fetch/pull/merge/push;
-- edit, rename, and reorder Profile sources under the same transaction contract;
+- edit or rename Profile metadata under the same transaction contract;
 - configurable agent detection and target paths;
 - controlled import or archive for independent native rules;
 - typed resources beyond instruction Markdown;

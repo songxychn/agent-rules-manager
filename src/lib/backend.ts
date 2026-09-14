@@ -15,7 +15,7 @@ import { demoAgents } from "./agentCatalog";
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
-const demoRoot = "/Users/baizhukui/.agent-rules";
+const demoRoot = "/Users/demo/.agent-rules";
 
 let demoSnapshot: WorkspaceSnapshot = {
   libraryRoot: demoRoot,
@@ -61,19 +61,19 @@ let demoSnapshot: WorkspaceSnapshot = {
     {
       id: "claude",
       label: "Claude Code",
-      targetPath: "/Users/baizhukui/.claude/CLAUDE.md",
+      targetPath: "/Users/demo/.claude/CLAUDE.md",
       mode: "symlink",
       state: "inSync",
       targetKind: "connectedLink",
       installed: true,
       connected: true,
-      detectionDetail: "Detected configuration at /Users/baizhukui/.claude.",
+      detectionDetail: "Detected configuration at /Users/demo/.claude.",
       detail: "Linked directly to the canonical rules.",
     },
     {
       id: "codex",
       label: "Codex",
-      targetPath: "/Users/baizhukui/.codex/AGENTS.md",
+      targetPath: "/Users/demo/.codex/AGENTS.md",
       mode: "symlink",
       state: "inSync",
       targetKind: "connectedLink",
@@ -85,7 +85,7 @@ let demoSnapshot: WorkspaceSnapshot = {
     {
       id: "grok",
       label: "Grok",
-      targetPath: "/Users/baizhukui/.grok/AGENTS.md",
+      targetPath: "/Users/demo/.grok/AGENTS.md",
       mode: "symlink",
       state: "ready",
       targetKind: "missing",
@@ -97,30 +97,30 @@ let demoSnapshot: WorkspaceSnapshot = {
     {
       id: "opencode",
       label: "OpenCode",
-      targetPath: "/Users/baizhukui/.config/opencode/AGENTS.md",
+      targetPath: "/Users/demo/.config/opencode/AGENTS.md",
       mode: "symlink",
       state: "ready",
       targetKind: "independentFile",
       installed: true,
       connected: false,
-      detectionDetail: "Detected configuration at /Users/baizhukui/.config/opencode.",
+      detectionDetail: "Detected configuration at /Users/demo/.config/opencode.",
       detail: "Uses an independent native rules file.",
     },
     {
       id: "qwen",
       label: "Qwen Code",
-      targetPath: "/Users/baizhukui/.qwen/QWEN.md",
+      targetPath: "/Users/demo/.qwen/QWEN.md",
       mode: "symlink",
       state: "ready",
       targetKind: "missing",
       installed: true,
       connected: false,
-      detectionDetail: "Detected configuration at /Users/baizhukui/.qwen.",
+      detectionDetail: "Detected configuration at /Users/demo/.qwen.",
       detail: "No native rules file exists yet.",
     },
   ],
 };
-demoSnapshot.agents = demoAgents("global", "/Users/baizhukui").map((agent) => ({
+demoSnapshot.agents = demoAgents("global", "/Users/demo").map((agent) => ({
   ...agent, ...demoSnapshot.agents.find((existing) => existing.id === agent.id),
 }));
 const demoProjects = new Map<string, WorkspaceSnapshot["agents"]>();

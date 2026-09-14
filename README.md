@@ -4,6 +4,21 @@ Agent Rules Manager 是一个 local-first 的桌面应用与 CLI：用多个 **P
 
 规则正文仍由用户在 VS Code、Cursor、Typora 等工具中维护；本项目负责结构校验、规则生成、本机切换、Agent 检测、原生路径接入、变更预览以及带漂移保护的回滚。
 
+## 开发者试用
+
+当前是 `0.x` 早期版本，以源码方式提供试用，尚未提供桌面安装包、签名发行或自动更新。可先用浏览器演示了解流程，只需 Bun 1.4 或更高版本：
+
+```bash
+git clone https://github.com/songxychn/agent-rules-manager.git
+cd agent-rules-manager
+bun install --frozen-lockfile
+bun run dev
+```
+
+打开 <http://127.0.0.1:1420>。浏览器模式使用纯内存演示数据，操作不会读取或修改真实规则库、Agent 配置，也不会启动本地编辑器；刷新页面会重置演示数据。按 `Ctrl+C` 停止服务。
+
+要操作本机配置，请按下文的 [桌面开发](#桌面开发) 或 [CLI](#cli) 从源码运行。桌面端目前以 macOS 为主要开发环境；Linux、Windows 的完整安装、文件接入和回滚流程尚未建立发布验证矩阵，不承诺所有平台和 Agent 版本均已验证。试用问题可提交到 [Issues](https://github.com/songxychn/agent-rules-manager/issues)，附操作系统、版本、复现步骤和脱敏后的计划输出；敏感问题按 [安全策略](SECURITY.md) 私下报告。
+
 ## 核心模型
 
 - **Profile**：一套可同步的规则，全部正文固定写在该 Profile 的一个 `AGENTS.md` 中。
@@ -24,8 +39,8 @@ profiles/work/AGENTS.md ── generate ── .runtime/work-<digest>/
 
 - 同时检查命令和配置目录，避免桌面应用因 `PATH` 不完整漏掉已使用的 Agent。
 - 接入使用指向 `current/AGENTS.md` 的符号链接；退出接入时会把当前规则落成普通文件，之后可独立修改。
-- 已有普通文件是合法的“独立使用”状态；选择接入时会被视为冲突，绝不静默覆盖。
-- 写入前必须生成计划；任一目标存在未托管文件或异常链接时，整次操作停止。
+- 已有普通文件是合法的“独立使用”状态；接入前必须明确确认备份接管，绝不静默覆盖。
+- 写入前必须生成计划；普通文件接管未经确认，或任一目标存在异常链接等硬冲突时，整次操作停止。
 - 应用前持久化快照；回滚检测到应用后的人工修改时拒绝覆盖。
 
 ## 规则库布局
@@ -38,9 +53,7 @@ profiles/work/AGENTS.md ── generate ── .runtime/work-<digest>/
 ├── profiles/
 │   ├── default/
 │   │   ├── profile.json
-│   │   ├── AGENTS.md
-│   │   └── rules/
-│   │       └── safety.md
+│   │   └── AGENTS.md
 │   └── work/
 │       ├── profile.json
 │       └── AGENTS.md
@@ -70,7 +83,9 @@ profiles/work/AGENTS.md ── generate ── .runtime/work-<digest>/
 
 - 每个 Profile 固定使用一个 `AGENTS.md`，必须是普通 UTF-8 文件，不能是符号链接；
 - `profile.json` 仅保存名称、说明等元数据，不再配置文件列表；
-- 渲染结果带 `<!-- Source: profiles/<profile>/<file> -->` 注释，便于定位来源。
+- 渲染结果带 `<!-- Source: profiles/<profile>/AGENTS.md -->` 注释，便于定位来源。
+
+保存源文件不会自动更新已接入的 Agent。修改当前 Profile 的 `AGENTS.md` 后，需要预览并重新激活同一个 Profile，生成新的 Runtime；仅刷新界面或查询状态不会应用变更。所有已接入项目与全局目标都跟随本机当前 Profile，不支持每个项目独立选用 Profile。
 
 ## 多机器同步边界
 
@@ -91,7 +106,7 @@ profiles/work/AGENTS.md ── generate ── .runtime/work-<digest>/
 所有文件系统写入遵循相同事务边界：
 
 1. 先生成可读计划，不写文件。
-2. 未托管文件、异常链接、重复 id 或非法路径阻止完整操作。
+2. 未经确认的普通文件接管、异常链接、重复 id 或非法路径阻止完整操作；确认接管仅适用于 Agent 原生路径中的普通文件。
 3. 第一次修改前持久化每个目标的原始状态、期望摘要和本次新建目录。
 4. 应用时重新检查原始状态，并校验每个写入结果。
 5. 中途失败或显式回滚只恢复仍处于预期状态的目标。
@@ -161,10 +176,10 @@ Adapter 只处理 Agent 协议差异；同步的 Profile 内容保持 CLI 和 Pr
 
 ## CLI
 
-规则库写命令默认只输出计划，加 `--apply` 才执行：
+初始化、创建、删除和激活 Profile 默认只输出计划，加 `--apply` 才执行。Agent 接入使用独立的 `plan` / `apply` 命令；两种 `rollback` 命令会直接尝试恢复最近快照，并检查漂移。以下命令默认面向本机真实规则库和 Agent 路径：
 
 ```bash
-# 初始化、旧根文件迁移或 v1→v2 升级
+# 初始化、旧根文件迁移或 v1 / v2 → v3 升级
 cargo run -p arm-cli -- init
 cargo run -p arm-cli -- init --apply
 
@@ -174,13 +189,14 @@ cargo run -p arm-cli -- profiles create work --name "Work"
 cargo run -p arm-cli -- profiles create work --name "Work" --apply
 cargo run -p arm-cli -- profiles delete work
 cargo run -p arm-cli -- profiles delete work --apply
+# 首次启用、切换，或编辑 AGENTS.md 后刷新同一 Profile
 cargo run -p arm-cli -- profiles activate work
 cargo run -p arm-cli -- profiles activate work --apply
 cargo run -p arm-cli -- profiles rollback
 
 # Agent 原生路径
 cargo run -p arm-cli -- status
-cargo run -p arm-cli -- plan
+cargo run -p arm-cli -- plan --agents codex,claude
 cargo run -p arm-cli -- apply --agents codex,claude
 # 原生路径已有常规文件时，显式确认先备份再接管
 cargo run -p arm-cli -- apply --agents codex --backup-existing
@@ -195,11 +211,11 @@ cargo run -p arm-cli -- --project /absolute/project apply --agents cursor,copilo
 cargo run -p arm-cli -- --project /absolute/project apply --agents cursor --disconnect
 ```
 
-所有命令支持 `--root <directory>` 与 `--state-root <directory>`；查询和计划支持 `--json`。
+所有命令支持 `--root <directory>` 与 `--state-root <directory>`；查询和计划支持 `--json`。这两个参数只改变规则库和状态目录，不改变 Agent 原生目标路径，不能单独用作接入操作的隔离沙箱。
 
 ## 桌面开发
 
-需要 Bun、Rust stable 及 [Tauri 2 平台依赖](https://v2.tauri.app/start/prerequisites/)：
+需要 Bun 1.4 或更高版本、Rust stable 及 [Tauri 2 平台依赖](https://v2.tauri.app/start/prerequisites/)。在仓库目录运行：
 
 ```bash
 bun install --frozen-lockfile

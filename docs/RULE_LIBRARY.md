@@ -86,6 +86,8 @@ current -> .runtime/work-8d9f20b751a4
 
 Neither selection modifies a Profile manifest.
 
+All global and project Agent links on that machine follow this same selection. Project connections do not select separate Profiles and are not portable exports for other machines.
+
 ## Runtime manifest
 
 Runtime output is generated and must not be hand-edited:
@@ -106,6 +108,8 @@ Runtime output is generated and must not be hand-edited:
 ```
 
 The Profile digest includes logical source paths and exact contents. Changing AGENTS.md content selects another Runtime directory; `current` changes only through a verified transaction.
+
+Editing the source marks the selected Runtime stale; it does not automatically regenerate it. Preview and activate the same Profile again to refresh connected Agents. Reading status or refreshing the UI never applies source changes.
 
 ## Schema v1 / v2 import
 

@@ -9,3 +9,14 @@
 vite.config.js
 vite.config.d.ts
 src-tauri/gen/
+
+# Local agent state and generated code indexes
+/.codegraph/
+/.codex/
+
+# Local environment values; keep shareable templates
+.env
+.env.*
+!.env.example
+!.env.sample
+!.env.template
