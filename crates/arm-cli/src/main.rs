@@ -22,6 +22,10 @@ struct Cli {
     #[arg(long, global = true)]
     state_root: Option<PathBuf>,
 
+    /// Use project rule targets in this existing directory instead of global targets.
+    #[arg(long, global = true)]
+    project: Option<PathBuf>,
+
     #[command(subcommand)]
     command: Command,
 }
@@ -95,24 +99,6 @@ enum ProfileCommand {
         #[arg(long)]
         json: bool,
     },
-    /// Preview or append a supplemental Markdown source to a Profile.
-    AddFile {
-        profile_id: String,
-        relative_path: String,
-        #[arg(long)]
-        apply: bool,
-        #[arg(long)]
-        json: bool,
-    },
-    /// Preview or remove a supplemental Markdown source from a Profile.
-    RemoveFile {
-        profile_id: String,
-        relative_path: String,
-        #[arg(long)]
-        apply: bool,
-        #[arg(long)]
-        json: bool,
-    },
     /// Preview or delete an inactive Profile and all of its declared sources.
     Delete {
         id: String,
@@ -151,6 +137,10 @@ fn run() -> Result<(), ArmError> {
         .map(PathBuf::from)
         .ok_or_else(|| ArmError::MissingSource("HOME is not set".into()))?;
     let manager = RulesManager::new(root, state_root, &home);
+    let manager = match cli.project {
+        Some(project) => manager.for_project(&home, &project)?,
+        None => manager,
+    };
 
     match cli.command {
         Command::Init { apply, json } => {
@@ -195,6 +185,12 @@ fn run() -> Result<(), ArmError> {
                         },
                         agent.target_path
                     );
+                    if !agent.note.is_empty() {
+                        println!("  {}", agent.note);
+                    }
+                    if let Some(warning) = agent.warning {
+                        println!("  Warning: {warning}");
+                    }
                 }
             }
         }
@@ -206,11 +202,10 @@ fn run() -> Result<(), ArmError> {
                 } else {
                     for profile in profiles {
                         println!(
-                            "{}{}  {}  {} file(s)",
+                            "{}{}  {}  AGENTS.md",
                             if profile.is_active { "* " } else { "  " },
                             profile.id,
-                            profile.name,
-                            profile.files.len()
+                            profile.name
                         );
                     }
                 }
@@ -227,39 +222,6 @@ fn run() -> Result<(), ArmError> {
                 } else {
                     print_library_plan(
                         manager.plan_create_profile(&id, &name, &description)?,
-                        json,
-                    )?;
-                }
-            }
-            ProfileCommand::AddFile {
-                profile_id,
-                relative_path,
-                apply,
-                json,
-            } => {
-                if apply {
-                    print_mutation(manager.add_profile_file(&profile_id, &relative_path)?, json)?;
-                } else {
-                    print_library_plan(
-                        manager.plan_add_profile_file(&profile_id, &relative_path)?,
-                        json,
-                    )?;
-                }
-            }
-            ProfileCommand::RemoveFile {
-                profile_id,
-                relative_path,
-                apply,
-                json,
-            } => {
-                if apply {
-                    print_mutation(
-                        manager.remove_profile_file(&profile_id, &relative_path)?,
-                        json,
-                    )?;
-                } else {
-                    print_library_plan(
-                        manager.plan_remove_profile_file(&profile_id, &relative_path)?,
                         json,
                     )?;
                 }

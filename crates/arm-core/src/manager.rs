@@ -19,6 +19,7 @@ pub struct RulesManager {
     library_root: PathBuf,
     state_root: PathBuf,
     adapters: Vec<AgentAdapter>,
+    project_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -35,6 +36,8 @@ struct BackupEntry {
     target_path: String,
     original: FileState,
     applied_digest: String,
+    #[serde(default)]
+    project_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -52,6 +55,7 @@ struct PreparedChange {
     original: FileState,
     desired: FileState,
     preserve_original: bool,
+    project_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +73,7 @@ impl RulesManager {
             library_root,
             state_root,
             adapters: default_adapters(home),
+            project_root: None,
         }
     }
 
@@ -81,7 +86,30 @@ impl RulesManager {
             library_root,
             state_root,
             adapters,
+            project_root: None,
         }
+    }
+
+    /// Select project-native targets instead of machine-global targets.
+    pub fn for_project(mut self, home: &Path, project: &Path) -> Result<Self, ArmError> {
+        self.adapters = crate::project_adapters(home, project)?;
+        let project = project
+            .canonicalize()
+            .map_err(|e| ArmError::io(project.display().to_string(), e))?;
+        for protected in [&self.library_root, &self.state_root] {
+            let protected = protected
+                .canonicalize()
+                .unwrap_or(absolute_logical_path(protected)?);
+            if self
+                .adapters
+                .iter()
+                .any(|a| a.target_path.starts_with(&protected))
+            {
+                return Err(ArmError::UnsupportedEntry(project.display().to_string()));
+            }
+        }
+        self.project_root = Some(project);
+        Ok(self)
     }
 
     pub fn source_path(&self) -> PathBuf {
@@ -112,48 +140,6 @@ impl RulesManager {
         description: &str,
     ) -> Result<LibraryMutationOutcome, ArmError> {
         library::create_profile(&self.library_root, &self.state_root, id, name, description)
-    }
-
-    pub fn plan_add_profile_file(
-        &self,
-        profile_id: &str,
-        relative_path: &str,
-    ) -> Result<LibraryPlan, ArmError> {
-        library::plan_add_profile_file(&self.library_root, profile_id, relative_path)
-    }
-
-    pub fn add_profile_file(
-        &self,
-        profile_id: &str,
-        relative_path: &str,
-    ) -> Result<LibraryMutationOutcome, ArmError> {
-        library::add_profile_file(
-            &self.library_root,
-            &self.state_root,
-            profile_id,
-            relative_path,
-        )
-    }
-
-    pub fn plan_remove_profile_file(
-        &self,
-        profile_id: &str,
-        relative_path: &str,
-    ) -> Result<LibraryPlan, ArmError> {
-        library::plan_remove_profile_file(&self.library_root, profile_id, relative_path)
-    }
-
-    pub fn remove_profile_file(
-        &self,
-        profile_id: &str,
-        relative_path: &str,
-    ) -> Result<LibraryMutationOutcome, ArmError> {
-        library::remove_profile_file(
-            &self.library_root,
-            &self.state_root,
-            profile_id,
-            relative_path,
-        )
     }
 
     pub fn plan_delete_profile(&self, profile_id: &str) -> Result<LibraryPlan, ArmError> {
@@ -255,6 +241,20 @@ impl RulesManager {
         {
             let status = self.inspect_adapter(adapter, &source_path, legacy_source)?;
             let desired_connected = requested[&adapter.id];
+            if desired_connected && status.warning.is_some() {
+                blocked = true;
+                steps.push(PlanStep {
+                    agent_id: status.id,
+                    agent_label: status.label,
+                    target_path: status.target_path,
+                    state: status.state,
+                    desired_connected,
+                    action: "blocked".into(),
+                    summary: status.warning.unwrap(),
+                    requires_confirmation: false,
+                });
+                continue;
+            }
             let mut requires_confirmation = false;
             let (action, summary) = match (desired_connected, status.target_kind) {
                 (true, TargetKind::ConnectedLink) => (
@@ -453,6 +453,7 @@ impl RulesManager {
                 original,
                 desired,
                 preserve_original: step.requires_confirmation,
+                project_root: self.project_root.clone(),
             });
         }
         let backup = BackupSnapshot {
@@ -465,6 +466,7 @@ impl RulesManager {
                         target_path: change.path.display().to_string(),
                         original: change.original.clone(),
                         applied_digest: file_state_digest(&change.desired)?,
+                        project_root: change.project_root.clone(),
                     })
                 })
                 .collect::<Result<Vec<_>, ArmError>>()?,
@@ -482,6 +484,12 @@ impl RulesManager {
 
         let mut completed = Vec::new();
         for (index, change) in prepared.iter().enumerate() {
+            if let Err(error) =
+                validate_project_boundary(&change.path, change.project_root.as_deref())
+            {
+                let _ = restore_prepared_changes(&prepared[..index]);
+                return Err(error);
+            }
             let current = match read_file_state(&change.path) {
                 Ok(current) => current,
                 Err(error) => {
@@ -529,6 +537,7 @@ impl RulesManager {
 
         for entry in &backup.entries {
             let path = PathBuf::from(&entry.target_path);
+            validate_project_boundary(&path, entry.project_root.as_deref())?;
             let current = read_file_state(&path)?;
             let current_digest = file_state_digest(&current)?;
             let original_digest = file_state_digest(&entry.original)?;
@@ -552,38 +561,38 @@ impl RulesManager {
         })
     }
 
-    fn resolve_selection(&self, selected: &[String]) -> Result<BTreeSet<String>, ArmError> {
-        let known = self
-            .adapters
+    fn canonical_agent_id(&self, id: &str) -> Result<String, ArmError> {
+        self.adapters
             .iter()
+            .find(|adapter| adapter.id == id || adapter.aliases.iter().any(|alias| alias == id))
             .map(|adapter| adapter.id.clone())
-            .collect::<BTreeSet<_>>();
+            .ok_or_else(|| ArmError::UnknownAgent(id.into()))
+    }
+
+    fn resolve_selection(&self, selected: &[String]) -> Result<BTreeSet<String>, ArmError> {
         if selected.is_empty() {
-            return Ok(known);
+            return Ok(self.adapters.iter().map(|a| a.id.clone()).collect());
         }
-        for id in selected {
-            if !known.contains(id) {
-                return Err(ArmError::UnknownAgent(id.clone()));
-            }
-        }
-        Ok(selected.iter().cloned().collect())
+        selected
+            .iter()
+            .map(|id| self.canonical_agent_id(id))
+            .collect()
     }
 
     fn resolve_connection_changes(
         &self,
         changes: &[ConnectionChange],
     ) -> Result<BTreeMap<String, bool>, ArmError> {
-        let known = self
-            .adapters
-            .iter()
-            .map(|adapter| adapter.id.as_str())
-            .collect::<BTreeSet<_>>();
         let mut requested = BTreeMap::new();
         for change in changes {
-            if !known.contains(change.agent_id.as_str()) {
-                return Err(ArmError::UnknownAgent(change.agent_id.clone()));
+            let id = self.canonical_agent_id(&change.agent_id)?;
+            if let Some(previous) = requested.insert(id.clone(), change.connected) {
+                if previous != change.connected {
+                    return Err(ArmError::Blocked(format!(
+                        "Conflicting requests for shared target {id}"
+                    )));
+                }
             }
-            requested.insert(change.agent_id.clone(), change.connected);
         }
         Ok(requested)
     }
@@ -594,9 +603,16 @@ impl RulesManager {
         source_path: &Path,
         legacy_source: Option<&Path>,
     ) -> Result<AgentStatus, ArmError> {
+        validate_project_boundary(&adapter.target_path, self.project_root.as_deref())?;
         let inspection =
             inspect_projection_target(&adapter.target_path, source_path, legacy_source)?;
         let (installed, detection_detail) = detect_adapter(adapter);
+        let warning = adapter.max_chars.and_then(|limit| {
+            fs::read_to_string(source_path).ok().and_then(|content| {
+                let count = content.encode_utf16().count();
+                (count > limit).then(|| format!("Rules contain {count} characters; {} supports at most {limit}. Shorten the Profile before connecting; rules are never truncated.", adapter.label))
+            })
+        });
         Ok(AgentStatus {
             id: adapter.id.clone(),
             label: adapter.label.clone(),
@@ -607,6 +623,11 @@ impl RulesManager {
             installed,
             connected: inspection.connected,
             detection_detail,
+            scope: adapter.scope.clone(),
+            note: adapter.note.clone(),
+            docs_url: adapter.docs_url.clone(),
+            max_chars: adapter.max_chars,
+            warning,
             detail: inspection.detail,
         })
     }
@@ -977,6 +998,32 @@ fn legacy_include_is_only_managed_content(state: &FileState) -> bool {
         .is_empty()
 }
 
+/// Project instruction directories may not redirect a write outside the chosen root.
+fn validate_project_boundary(path: &Path, root: Option<&Path>) -> Result<(), ArmError> {
+    let Some(root) = root else {
+        return Ok(());
+    };
+    let relative = path
+        .strip_prefix(root)
+        .map_err(|_| ArmError::UnsupportedEntry(path.display().to_string()))?;
+    let mut current = root.to_path_buf();
+    let parents = relative.parent().unwrap_or_else(|| Path::new(""));
+    for component in std::iter::once(None).chain(parents.components().map(Some)) {
+        if let Some(component) = component {
+            current.push(component);
+        }
+        match fs::symlink_metadata(&current) {
+            Ok(metadata) if !metadata.is_dir() || metadata.file_type().is_symlink() => {
+                return Err(ArmError::UnsupportedEntry(current.display().to_string()))
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound && current != root => {}
+            Err(error) => return Err(ArmError::io(current.display().to_string(), error)),
+        }
+    }
+    Ok(())
+}
+
 fn replace_file_state(
     path: &Path,
     original: &FileState,
@@ -1017,6 +1064,10 @@ fn replace_file_state(
 fn restore_prepared_changes(changes: &[PreparedChange]) -> bool {
     let mut restored = true;
     for change in changes.iter().rev() {
+        if validate_project_boundary(&change.path, change.project_root.as_deref()).is_err() {
+            restored = false;
+            continue;
+        }
         match read_file_state(&change.path) {
             Ok(current) if current == change.desired => {
                 if restore_file_state(&change.path, &change.original).is_err() {
@@ -1206,7 +1257,8 @@ mod tests {
         let library = home.join(".agent-rules");
         let state = home.join("state");
         fs::create_dir_all(&home).expect("home");
-        let manager = RulesManager::new(library, state, &home);
+        let manager =
+            RulesManager::with_adapters(library, state, crate::adapters::test_adapters(&home));
         (root, manager, home)
     }
 
@@ -1228,16 +1280,16 @@ mod tests {
 
         let plan = manager.plan(&[]).expect("plan");
         assert!(!plan.blocked);
-        assert_eq!(plan.change_count, 5);
+        assert_eq!(plan.change_count, manager.adapters.len());
 
         let applied = manager.apply(&[]).expect("apply");
-        assert_eq!(applied.changed.len(), 5);
+        assert_eq!(applied.changed.len(), manager.adapters.len());
         assert!(home.join(".claude/CLAUDE.md").is_symlink());
         assert!(home.join(".codex/AGENTS.md").is_symlink());
         assert!(home.join(".qwen/QWEN.md").is_symlink());
 
         let rollback = manager.rollback_latest().expect("rollback");
-        assert_eq!(rollback.restored.len(), 5);
+        assert_eq!(rollback.restored.len(), manager.adapters.len());
         assert!(!home.join(".claude/CLAUDE.md").exists());
         assert!(!home.join(".codex/AGENTS.md").exists());
     }
@@ -1442,7 +1494,11 @@ mod tests {
         let library = home.join(".agent-rules");
         let state_root = home.join("state");
         fs::create_dir_all(&home).expect("home");
-        let manager = RulesManager::new(library, state_root.clone(), &home);
+        let manager = RulesManager::with_adapters(
+            library,
+            state_root.clone(),
+            crate::adapters::test_adapters(&home),
+        );
         manager.initialize().expect("initialize");
         fs::write(state_root.join("backups"), "not a directory").expect("backup blocker");
 
@@ -1457,7 +1513,11 @@ mod tests {
         let library = home.join(".agent-rules");
         let state_root = home.join("state");
         fs::create_dir_all(&home).expect("home");
-        let manager = RulesManager::new(library, state_root.clone(), &home);
+        let manager = RulesManager::with_adapters(
+            library,
+            state_root.clone(),
+            crate::adapters::test_adapters(&home),
+        );
         manager.initialize().expect("initialize");
         let codex = home.join(".codex/AGENTS.md");
         fs::create_dir_all(codex.parent().unwrap()).expect("codex dir");
@@ -1489,6 +1549,7 @@ mod tests {
                     content: "applied first".into(),
                 },
                 preserve_original: false,
+                project_root: None,
             },
             PreparedChange {
                 agent_id: "second".into(),
@@ -1500,6 +1561,7 @@ mod tests {
                     content: "applied second".into(),
                 },
                 preserve_original: false,
+                project_root: None,
             },
         ];
 
@@ -1549,5 +1611,145 @@ mod tests {
             .expect("codex status");
         assert_eq!(status.state, TargetState::Conflict);
         assert_eq!(status.target_kind, TargetKind::ForeignLink);
+    }
+    #[test]
+    fn shared_antigravity_aliases_apply_once_and_reject_conflicting_requests() {
+        let (_root, manager, _home) = fixture();
+        manager.initialize().unwrap();
+        assert_eq!(
+            manager
+                .plan(&["gemini".into(), "ag".into(), "antigravity".into()])
+                .unwrap()
+                .change_count,
+            1
+        );
+        assert!(manager
+            .plan_connections(&[
+                ConnectionChange {
+                    agent_id: "gemini".into(),
+                    connected: true
+                },
+                ConnectionChange {
+                    agent_id: "ag".into(),
+                    connected: false
+                },
+            ])
+            .is_err());
+        let applied = manager.apply(&["ag".into(), "gemini".into()]).unwrap();
+        assert_eq!(applied.changed.len(), 1);
+        assert_eq!(
+            manager.plan(&["antigravity".into()]).unwrap().change_count,
+            0
+        );
+    }
+
+    #[test]
+    fn overlong_rules_block_connecting_without_truncation_and_allow_disconnect() {
+        let (_root, manager, _home) = fixture();
+        manager.initialize().unwrap();
+        manager.apply(&["windsurf".into()]).unwrap();
+        fs::write(
+            manager.library_root.join("profiles/default/AGENTS.md"),
+            "中".repeat(6100),
+        )
+        .unwrap();
+        manager.activate_profile("default").unwrap();
+        let plan = manager.plan(&["windsurf".into()]).unwrap();
+        assert!(plan.blocked);
+        assert!(plan.steps[0].summary.contains("6000"));
+        assert_eq!(plan.change_count, 0);
+        assert!(manager.apply(&["windsurf".into()]).is_err());
+        manager
+            .apply_connections(&[ConnectionChange {
+                agent_id: "windsurf".into(),
+                connected: false,
+            }])
+            .unwrap();
+        let target = &manager
+            .adapters
+            .iter()
+            .find(|a| a.id == "windsurf")
+            .unwrap()
+            .target_path;
+        assert_eq!(
+            fs::read_to_string(target).unwrap(),
+            fs::read_to_string(manager.source_path()).unwrap()
+        );
+    }
+
+    #[test]
+    fn project_connect_switch_disconnect_and_rollback_keep_rules_and_existing_files() {
+        let (_root, global, home) = fixture();
+        global.initialize().unwrap();
+        let project = home.join("project");
+        fs::create_dir(&project).unwrap();
+        fs::write(project.join("AGENTS.md"), "original project rules").unwrap();
+        let manager = global.clone().for_project(&home, &project).unwrap();
+        let plan = manager.plan(&["cursor".into()]).unwrap();
+        assert_eq!(plan.confirmation_count, 1);
+        assert!(manager.apply(&["cursor".into()]).is_err());
+        assert_eq!(
+            fs::read_to_string(project.join("AGENTS.md")).unwrap(),
+            "original project rules"
+        );
+        manager.apply_confirmed(&["cursor".into()], true).unwrap();
+        global.create_profile("work", "Work", "").unwrap();
+        fs::write(
+            global.library_root.join("profiles/work/AGENTS.md"),
+            "switched rules",
+        )
+        .unwrap();
+        global.activate_profile("work").unwrap();
+        assert!(fs::read_to_string(project.join("AGENTS.md"))
+            .unwrap()
+            .contains("switched rules"));
+        assert_eq!(manager.plan(&["cursor".into()]).unwrap().change_count, 0);
+        manager
+            .apply_connections(&[ConnectionChange {
+                agent_id: "cursor".into(),
+                connected: false,
+            }])
+            .unwrap();
+        assert!(!project.join("AGENTS.md").is_symlink());
+        global.rollback_latest().unwrap();
+        assert!(project.join("AGENTS.md").is_symlink());
+        global.rollback_latest().unwrap();
+        assert_eq!(
+            fs::read_to_string(project.join("AGENTS.md")).unwrap(),
+            "original project rules"
+        );
+        assert!(!home.join(".codex/AGENTS.md").exists());
+    }
+
+    #[test]
+    fn project_parent_links_block_apply_and_rollback_outside_the_project() {
+        let (_root, global, home) = fixture();
+        global.initialize().unwrap();
+        let project = home.join("project");
+        let outside = home.join("outside");
+        fs::create_dir(&project).unwrap();
+        fs::create_dir(&outside).unwrap();
+        let manager = global.clone().for_project(&home, &project).unwrap();
+        std::os::unix::fs::symlink(&outside, project.join(".github")).unwrap();
+        assert!(manager.plan(&["copilot-ide".into()]).is_err());
+        assert!(manager.apply(&["copilot-ide".into()]).is_err());
+        assert!(!outside.join("copilot-instructions.md").exists());
+        fs::remove_file(project.join(".github")).unwrap();
+        manager.apply(&["copilot-ide".into()]).unwrap();
+        fs::rename(project.join(".github"), project.join(".github-original")).unwrap();
+        std::os::unix::fs::symlink(&outside, project.join(".github")).unwrap();
+        assert!(global.rollback_latest().is_err());
+        assert!(!outside.join("copilot-instructions.md").exists());
+        assert!(project
+            .join(".github-original/copilot-instructions.md")
+            .is_symlink());
+    }
+
+    #[test]
+    fn project_targets_cannot_replace_the_rule_library() {
+        let (_root, manager, home) = fixture();
+        manager.initialize().unwrap();
+        let current = manager.library_root.join("current");
+        assert!(manager.clone().for_project(&home, &current).is_err());
     }
 }

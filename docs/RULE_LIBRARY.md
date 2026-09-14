@@ -4,11 +4,11 @@ The active format is intentionally small, JSON-based, and independent of any Age
 
 ## Root schema
 
-`schema.json` identifies Profile-owned schema v2 and its transport boundary:
+`schema.json` identifies single-file Profile schema v3 and its transport boundary:
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "format": "agent-rules-library",
   "sync": {
     "include": [
@@ -36,23 +36,15 @@ Directory name and `id` must match:
 ```text
 profiles/work/
 ├── profile.json
-├── AGENTS.md
-└── rules/
-    ├── safety.md
-    └── review.md
+└── AGENTS.md
 ```
 
 ```json
 {
-  "schemaVersion": 2,
+  "schemaVersion": 3,
   "id": "work",
   "name": "Work machine",
-  "description": "Shared engineering and review conventions.",
-  "instructions": [
-    "AGENTS.md",
-    "rules/safety.md",
-    "rules/review.md"
-  ]
+  "description": "Shared engineering and review conventions."
 }
 ```
 
@@ -61,14 +53,12 @@ Rules:
 - `id`: 1–64 characters; begins with a lowercase ASCII letter or digit; remaining characters may also use `_` and `-`;
 - `name`: non-empty, at most 80 characters;
 - `description`: optional, at most 240 characters;
-- `instructions`: non-empty and ordered;
-- first instruction: exactly `AGENTS.md`;
-- every instruction: a unique relative `.md` path with only normal path components;
-- every source: a regular UTF-8 file; symlinks are rejected.
+- the only rule source is `AGENTS.md`, a regular UTF-8 file; symlinks are rejected;
+- v3 metadata has no configurable source list. Supplemental sources are not supported.
 
-Creating a Profile writes `profile.json` and its required `AGENTS.md` together. Adding a supplemental source updates the manifest and creates the file in one previewed transaction. Existing paths are never overwritten. Removing a supplemental source updates the manifest and deletes that exact declared file in one rollback-protected transaction. The required `AGENTS.md` entrypoint cannot be removed, and undeclared paths are never touched.
+Creating a Profile writes `profile.json` and `AGENTS.md` together in a previewed transaction. Existing paths are never overwritten. Edit all rules in that AGENTS.md; no add-file or remove-file command is exposed.
 
-Deleting a Profile is also previewed and rollback-protected. It is allowed only while the Profile is inactive on the current machine and only when its directory contains exactly `profile.json`, the declared instruction files, and their parent directories. Any undeclared file, directory, or symlink blocks the complete deletion. The transaction snapshots every owned file, removes the empty directory tree, and restores the files and directories on rollback unless a deleted path has since drifted.
+Deleting an inactive Profile snapshots its metadata and AGENTS.md, then removes its directory. Any undeclared file, directory, or symlink blocks deletion. Rollback restores the original files unless a target has since drifted.
 
 Profile documents contain no active flag. The same synced Profile can be active on one machine and inactive on another without changing source files.
 
@@ -110,28 +100,20 @@ Runtime output is generated and must not be hand-edited:
     {
       "path": "AGENTS.md",
       "digest": "62a4fb4f20c1"
-    },
-    {
-      "path": "rules/review.md",
-      "digest": "a1d19e80bc3e"
     }
   ]
 }
 ```
 
-The Profile digest includes logical source paths and exact contents. Renaming a source or changing content selects another Runtime directory; `current` changes only through a verified transaction.
+The Profile digest includes logical source paths and exact contents. Changing AGENTS.md content selects another Runtime directory; `current` changes only through a verified transaction.
 
-## Schema v1 import
+## Schema v1 / v2 import
 
-Schema v1 used `packs/**` plus `profiles/<id>.json`. It is accepted only for previewed migration to v2.
+Both legacy formats require a previewed upgrade to v3. V1 used `packs/**` and `profiles/<id>.json`; v2 stored an ordered `instructions` list in each Profile manifest.
 
-For every legacy Profile, migration copies referenced files in the old render order:
+Migration concatenates each Profile's source contents in the original order into its AGENTS.md, adding only separating newlines. A single source is preserved byte for byte. Original files and metadata are snapshotted before writes; supplemental files are removed only after their merged content is prepared. V2 supplemental directories are removed once empty, except ancestors of undeclared empty directories. Undeclared empty directory trees are preserved and do not block v2 migration. Undeclared files, symlinks, and unused v1 Packs still block migration.
 
-- the first source becomes `profiles/<profile>/AGENTS.md`;
-- later files use deterministic paths under `profiles/<profile>/rules/<legacy-pack>/`;
-- content is copied exactly before any old source is removed;
-- unused legacy Packs and undeclared entries block migration to prevent loss;
-- a rollback snapshot restores the v1 files and removes only newly created empty directories.
+The local active Profile is preserved and regenerated. A library without a local selection remains unselected. Source migration and runtime activation use separate existing snapshots; restore activation first, then migration. Rollback refuses to overwrite post-apply drift.
 
 ## Git baseline
 

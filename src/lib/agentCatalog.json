@@ -1,0 +1,418 @@
+[
+  {
+    "id": "claude",
+    "label": "Claude Code",
+    "scope": "global",
+    "path": ".claude/CLAUDE.md",
+    "commands": [
+      "claude"
+    ],
+    "markers": [
+      ".claude"
+    ],
+    "apps": [],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "codex",
+    "label": "Codex",
+    "scope": "global",
+    "path": ".codex/AGENTS.md",
+    "commands": [
+      "codex"
+    ],
+    "markers": [
+      ".codex"
+    ],
+    "apps": [
+      "Codex",
+      "ChatGPT"
+    ],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "grok",
+    "label": "Grok",
+    "scope": "global",
+    "path": ".grok/AGENTS.md",
+    "commands": [
+      "grok"
+    ],
+    "markers": [
+      ".grok"
+    ],
+    "apps": [],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "opencode",
+    "label": "OpenCode",
+    "scope": "global",
+    "path": ".config/opencode/AGENTS.md",
+    "commands": [
+      "opencode"
+    ],
+    "markers": [
+      ".config/opencode",
+      ".opencode/bin/opencode"
+    ],
+    "apps": [
+      "OpenCode"
+    ],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "qwen",
+    "label": "Qwen Code",
+    "scope": "global",
+    "path": ".qwen/QWEN.md",
+    "commands": [
+      "qwen"
+    ],
+    "markers": [
+      ".qwen"
+    ],
+    "apps": [],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "gemini",
+    "label": "Gemini CLI",
+    "scope": "global",
+    "path": ".gemini/GEMINI.md",
+    "commands": [
+      "gemini"
+    ],
+    "markers": [
+      ".gemini"
+    ],
+    "apps": [],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "https://geminicli.com/docs/cli/gemini-md/",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "antigravity",
+    "label": "Antigravity",
+    "scope": "global",
+    "path": ".gemini/GEMINI.md",
+    "commands": [
+      "antigravity"
+    ],
+    "markers": [
+      ".gemini/antigravity"
+    ],
+    "apps": [
+      "Antigravity"
+    ],
+    "aliases": [
+      "ag"
+    ],
+    "note": "Antigravity: 12,000 characters per rule file.",
+    "docsUrl": "https://antigravity.google/docs/rules-workflows",
+    "maxChars": 12000,
+    "noteZh": "Antigravity 每个规则文件最多 12,000 字符；默认与 Gemini CLI 共用同一文件。"
+  },
+  {
+    "id": "copilot",
+    "label": "GitHub Copilot CLI",
+    "scope": "global",
+    "path": ".copilot/copilot-instructions.md",
+    "commands": [
+      "copilot"
+    ],
+    "markers": [
+      ".copilot"
+    ],
+    "apps": [],
+    "aliases": [
+      "github-copilot"
+    ],
+    "note": "",
+    "docsUrl": "https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "windsurf",
+    "label": "Windsurf / Cascade",
+    "scope": "global",
+    "path": ".codeium/windsurf/memories/global_rules.md",
+    "commands": [
+      "windsurf"
+    ],
+    "markers": [
+      ".codeium/windsurf"
+    ],
+    "apps": [
+      "Windsurf"
+    ],
+    "aliases": [],
+    "note": "Cascade global rules: 6,000 characters. Does not configure the Devin Local agent.",
+    "docsUrl": "https://docs.devin.ai/desktop/cascade/memories",
+    "maxChars": 6000,
+    "noteZh": "Cascade 全局规则最多 6,000 字符；此入口不配置 Devin Local Agent。"
+  },
+  {
+    "id": "cline",
+    "label": "Cline (VS Code)",
+    "scope": "global",
+    "path": "Documents/Cline/Rules/agent-rules.md",
+    "commands": [],
+    "markers": [
+      "Documents/Cline"
+    ],
+    "apps": [],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "https://docs.cline.bot/customization/cline-rules",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "cline-cli",
+    "label": "Cline CLI",
+    "scope": "global",
+    "path": ".cline/data/settings/rules/agent-rules.md",
+    "commands": [
+      "cline"
+    ],
+    "markers": [
+      ".cline"
+    ],
+    "apps": [],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "https://docs.cline.bot/cli/cli-reference",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "roo",
+    "label": "Roo Code",
+    "scope": "global",
+    "path": ".roo/rules/agent-rules.md",
+    "commands": [],
+    "markers": [
+      ".roo"
+    ],
+    "apps": [],
+    "aliases": [
+      "roo-code"
+    ],
+    "note": "",
+    "docsUrl": "https://github.com/RooCodeInc/Roo-Code/blob/main/apps/docs/docs/features/custom-instructions.md",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "kilo",
+    "label": "Kilo Code (legacy extension)",
+    "scope": "global",
+    "path": ".kilocode/rules/agent-rules.md",
+    "commands": [],
+    "markers": [
+      ".kilocode"
+    ],
+    "apps": [],
+    "aliases": [
+      "kilocode"
+    ],
+    "note": "Legacy VS Code extension rules; not the new Kilo CLI.",
+    "docsUrl": "https://github.com/Kilo-Org/kilocode-legacy/blob/main/docs/legacy-ides/customize/custom-rules.md",
+    "maxChars": null,
+    "noteZh": "适用于旧版 VS Code 扩展，不适用于新版 Kilo CLI。"
+  },
+  {
+    "id": "kiro",
+    "label": "Kiro",
+    "scope": "global",
+    "path": ".kiro/steering/agent-rules.md",
+    "commands": [
+      "kiro",
+      "kiro-cli"
+    ],
+    "markers": [
+      ".kiro"
+    ],
+    "apps": [
+      "Kiro"
+    ],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "https://kiro.dev/docs/steering/",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "cursor",
+    "label": "Cursor",
+    "scope": "project",
+    "path": "AGENTS.md",
+    "commands": [
+      "cursor",
+      "cursor-agent"
+    ],
+    "markers": [
+      ".cursor"
+    ],
+    "apps": [
+      "Cursor"
+    ],
+    "aliases": [],
+    "note": "Project AGENTS.md. Global User Rules remain in Cursor Settings.",
+    "docsUrl": "https://cursor.com/docs/context/rules",
+    "maxChars": null,
+    "noteZh": "使用项目根 AGENTS.md；全局 User Rules 仍在 Cursor 设置中管理。"
+  },
+  {
+    "id": "copilot-ide",
+    "label": "GitHub Copilot (IDE)",
+    "scope": "project",
+    "path": ".github/copilot-instructions.md",
+    "commands": [],
+    "markers": [],
+    "apps": [],
+    "aliases": [],
+    "note": "Repository instructions; IDE support depends on the Copilot client.",
+    "docsUrl": "https://docs.github.com/en/copilot/reference/custom-instructions-support",
+    "maxChars": null,
+    "noteZh": "使用仓库级说明文件；支持范围取决于 Copilot 客户端。"
+  },
+  {
+    "id": "continue",
+    "label": "Continue",
+    "scope": "project",
+    "path": ".continue/rules/agent-rules.md",
+    "commands": [
+      "cn"
+    ],
+    "markers": [
+      ".continue"
+    ],
+    "apps": [],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "https://docs.continue.dev/customize/deep-dives/rules",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "amp",
+    "label": "Amp",
+    "scope": "global",
+    "path": ".config/amp/AGENTS.md",
+    "commands": [
+      "amp"
+    ],
+    "markers": [
+      ".config/amp"
+    ],
+    "apps": [],
+    "aliases": [],
+    "note": "",
+    "docsUrl": "https://ampcode.com/docs/customize/agents-md",
+    "maxChars": null,
+    "noteZh": ""
+  },
+  {
+    "id": "droid",
+    "label": "Factory Droid",
+    "scope": "global",
+    "path": ".factory/AGENTS.md",
+    "commands": [
+      "droid"
+    ],
+    "markers": [
+      ".factory"
+    ],
+    "apps": [],
+    "aliases": [
+      "factory"
+    ],
+    "note": "The total initial guideline budget is 80,000 characters, shared with other instruction files.",
+    "docsUrl": "https://docs.factory.ai/harness/agents-md",
+    "maxChars": 80000,
+    "noteZh": "启动时的说明文件共用 80,000 字符预算，其他文件也占用该预算。"
+  },
+  {
+    "id": "augment",
+    "label": "Augment / Auggie",
+    "scope": "global",
+    "path": ".augment/rules/agent-rules.md",
+    "commands": [
+      "auggie"
+    ],
+    "markers": [
+      ".augment"
+    ],
+    "apps": [],
+    "aliases": [
+      "auggie"
+    ],
+    "note": "User rules share a 24,576-character budget with other user rules.",
+    "docsUrl": "https://docs.augmentcode.com/setup-augment/guidelines",
+    "maxChars": 24576,
+    "noteZh": "用户规则共用 24,576 字符预算，其他用户规则也占用该预算。"
+  },
+  {
+    "id": "zed",
+    "label": "Zed Agent",
+    "scope": "global",
+    "path": ".config/zed/AGENTS.md",
+    "commands": [
+      "zed"
+    ],
+    "markers": [
+      ".config/zed"
+    ],
+    "apps": [
+      "Zed"
+    ],
+    "aliases": [],
+    "note": "Zed native Agent only; external agents and terminal threads use their own instructions.",
+    "docsUrl": "https://zed.dev/docs/ai/instructions",
+    "maxChars": null,
+    "noteZh": "仅用于 Zed 原生 Agent；外部 Agent 和终端使用各自的规则入口。"
+  },
+  {
+    "id": "junie",
+    "label": "Junie",
+    "scope": "project",
+    "path": ".junie/AGENTS.md",
+    "commands": [
+      "junie"
+    ],
+    "markers": [
+      ".junie"
+    ],
+    "apps": [],
+    "aliases": [],
+    "note": "Current Junie uses .junie/AGENTS.md exclusively when present; a custom Guidelines path takes precedence.",
+    "docsUrl": "https://junie.jetbrains.com/docs/junie-plugin-project-settings.html",
+    "maxChars": null,
+    "noteZh": "当前 Junie 优先只读取 .junie/AGENTS.md；自定义 Guidelines 路径优先于此默认路径。"
+  }
+]

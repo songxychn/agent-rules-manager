@@ -13,7 +13,10 @@ export function buildProjectionPlan(
       let summary = "Already uses the selected connection mode.";
       let requiresConfirmation = false;
 
-      if (desiredConnected && agent.targetKind === "legacyLink") {
+      if (desiredConnected && agent.warning) {
+        action = "blocked";
+        summary = agent.warning;
+      } else if (desiredConnected && agent.targetKind === "legacyLink") {
         action = "replaceLegacyLink";
         summary = "Move the managed legacy link to current/AGENTS.md.";
       } else if (desiredConnected && agent.targetKind === "legacyInclude") {

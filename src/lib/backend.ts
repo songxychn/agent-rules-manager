@@ -6,12 +6,12 @@ import type {
   LibraryPlan,
   OpenTarget,
   ProfileDraft,
-  ProfileFileDraft,
   ProjectionPlan,
   RollbackOutcome,
   WorkspaceSnapshot,
 } from "./types";
 import { buildProjectionPlan } from "./plan";
+import { demoAgents } from "./agentCatalog";
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -35,7 +35,6 @@ let demoSnapshot: WorkspaceSnapshot = {
       description: "A minimal baseline for any machine.",
       files: [
         { path: "AGENTS.md", digest: "62a4fb4f20c1", modifiedAt: "2026-08-26T08:36:00Z" },
-        { path: "rules/safety.md", digest: "a1d19e80bc3e", modifiedAt: "2026-08-25T09:12:00Z" },
       ],
       isActive: false,
     },
@@ -45,7 +44,6 @@ let demoSnapshot: WorkspaceSnapshot = {
       description: "Repository delivery and review conventions used at work.",
       files: [
         { path: "AGENTS.md", digest: "5c3fe71b9d02", modifiedAt: "2026-08-24T04:18:00Z" },
-        { path: "rules/review.md", digest: "0b79a43e04a8", modifiedAt: "2026-08-24T04:18:00Z" },
       ],
       isActive: true,
     },
@@ -122,6 +120,19 @@ let demoSnapshot: WorkspaceSnapshot = {
     },
   ],
 };
+demoSnapshot.agents = demoAgents("global", "/Users/baizhukui").map((agent) => ({
+  ...agent, ...demoSnapshot.agents.find((existing) => existing.id === agent.id),
+}));
+const demoProjects = new Map<string, WorkspaceSnapshot["agents"]>();
+function scopedDemo(projectRoot?: string): WorkspaceSnapshot {
+  if (!projectRoot) return demoSnapshot;
+  if (!projectRoot.startsWith("/") || projectRoot.split("/").includes("..")) {
+    throw new Error("Enter an absolute project directory without '..'.");
+  }
+  if (!demoProjects.has(projectRoot)) demoProjects.set(projectRoot, demoAgents("project", projectRoot));
+  return { ...demoSnapshot, agents: demoProjects.get(projectRoot)! };
+}
+let demoRollbackProject: string | undefined;
 let demoRollbackSnapshot: WorkspaceSnapshot | undefined;
 let demoLibraryRollbackSnapshot: WorkspaceSnapshot | undefined;
 let demoLibraryRollbackPaths: string[] | undefined;
@@ -154,9 +165,9 @@ function mutation(paths: string[]): LibraryMutationOutcome {
 
 export const backend = {
   isTauri,
-  async snapshot(libraryRoot?: string): Promise<WorkspaceSnapshot> {
-    if (isTauri) return invoke("get_workspace_snapshot", { libraryRoot });
-    return structuredClone(demoSnapshot);
+  async snapshot(libraryRoot?: string, projectRoot?: string): Promise<WorkspaceSnapshot> {
+    if (isTauri) return invoke("get_workspace_snapshot", { libraryRoot, projectRoot });
+    return structuredClone(scopedDemo(projectRoot));
   },
   async previewInitialize(libraryRoot?: string): Promise<LibraryPlan> {
     if (isTauri) return invoke("preview_initialize", { libraryRoot });
@@ -219,180 +230,34 @@ export const backend = {
       `${demoRoot}/profiles/${draft.id}/AGENTS.md`,
     ]);
   },
-  async previewAddProfileFile(
-    draft: ProfileFileDraft,
-    libraryRoot?: string,
-  ): Promise<LibraryPlan> {
-    if (isTauri) return invoke("preview_add_profile_file", { ...draft, libraryRoot });
-    const profile = demoSnapshot.profiles.find((candidate) => candidate.id === draft.profileId);
-    const blocked = !profile || profile.files.some((file) => file.path === draft.relativePath);
-    const path = `${demoRoot}/profiles/${draft.profileId}/${draft.relativePath}`;
-    return {
-      operation: "addProfileFile",
-      blocked,
-      changeCount: blocked ? 0 : 2,
-      summary: blocked
-        ? `\`${draft.relativePath}\` already exists or the Profile is unavailable.`
-        : `Add \`${draft.relativePath}\` after the existing sources in Profile \`${draft.profileId}\`.`,
-      steps: blocked
-        ? []
-        : [
-            step(
-              `${demoRoot}/profiles/${draft.profileId}/profile.json`,
-              "updateProfile",
-              "Append the ordered path.",
-            ),
-            step(path, "createRuleFile", "Create the Markdown source."),
-          ],
-    };
-  },
-  async addProfileFile(
-    draft: ProfileFileDraft,
-    libraryRoot?: string,
-  ): Promise<LibraryMutationOutcome> {
-    if (isTauri) return invoke("add_profile_file", { ...draft, libraryRoot });
-    demoSnapshot = {
-      ...demoSnapshot,
-      runtimeState:
-        demoSnapshot.activeProfileId === draft.profileId
-          ? "stale"
-          : demoSnapshot.runtimeState,
-      profiles: demoSnapshot.profiles.map((profile) =>
-        profile.id === draft.profileId
-          ? {
-              ...profile,
-              files: [...profile.files, { path: draft.relativePath, digest: "newfile00000" }],
-            }
-          : profile,
-      ),
-    };
-    return mutation([
-      `${demoRoot}/profiles/${draft.profileId}/profile.json`,
-      `${demoRoot}/profiles/${draft.profileId}/${draft.relativePath}`,
-    ]);
-  },
-  async previewRemoveProfileFile(
-    draft: ProfileFileDraft,
-    libraryRoot?: string,
-  ): Promise<LibraryPlan> {
-    if (isTauri) return invoke("preview_remove_profile_file", { ...draft, libraryRoot });
-    const profile = demoSnapshot.profiles.find((candidate) => candidate.id === draft.profileId);
-    const fileIndex = profile?.files.findIndex((file) => file.path === draft.relativePath) ?? -1;
-    const blocked = !profile || fileIndex <= 0;
-    const manifestPath = `${demoRoot}/profiles/${draft.profileId}/profile.json`;
-    const sourcePath = `${demoRoot}/profiles/${draft.profileId}/${draft.relativePath}`;
-    return {
-      operation: "removeProfileFile",
-      blocked,
-      changeCount: blocked ? 0 : 2,
-      summary: !profile
-        ? `Profile \`${draft.profileId}\` is unavailable.`
-        : fileIndex === 0
-          ? `\`AGENTS.md\` is the required first source in Profile \`${draft.profileId}\` and cannot be removed.`
-          : fileIndex < 0
-            ? `\`${draft.relativePath}\` is not declared by Profile \`${draft.profileId}\`; no file will be deleted.`
-            : `Remove \`${draft.relativePath}\` from Profile \`${draft.profileId}\` and delete its declared Markdown source with rollback protection.`,
-      steps: blocked
-        ? []
-        : [
-            step(
-              manifestPath,
-              "updateProfile",
-              "Remove the Markdown path from the ordered instruction manifest.",
-            ),
-            step(
-              sourcePath,
-              "deleteRuleFile",
-              "Delete the declared Markdown source after snapshotting its exact contents.",
-            ),
-          ],
-    };
-  },
-  async removeProfileFile(
-    draft: ProfileFileDraft,
-    libraryRoot?: string,
-  ): Promise<LibraryMutationOutcome> {
-    if (isTauri) return invoke("remove_profile_file", { ...draft, libraryRoot });
-    const profile = demoSnapshot.profiles.find((candidate) => candidate.id === draft.profileId);
-    const fileIndex = profile?.files.findIndex((file) => file.path === draft.relativePath) ?? -1;
-    if (!profile || fileIndex < 0) {
-      throw new Error(`Unknown Profile source: ${draft.profileId}/${draft.relativePath}`);
-    }
-    if (fileIndex === 0) {
-      throw new Error(
-        `\`AGENTS.md\` is the required first source in Profile \`${draft.profileId}\` and cannot be removed.`,
-      );
-    }
-    const preview = await this.previewRemoveProfileFile(draft, libraryRoot);
-    const changed = preview.steps.map((item) => item.path);
-    const backupId = "demo-remove-profile-file-snapshot";
-    demoLibraryRollbackSnapshot = structuredClone(demoSnapshot);
-    demoLibraryRollbackPaths = changed;
-    demoLibraryRollbackId = backupId;
-    demoSnapshot = {
-      ...demoSnapshot,
-      runtimeState: profile.isActive ? "stale" : demoSnapshot.runtimeState,
-      latestLibraryBackup: backupId,
-      profiles: demoSnapshot.profiles.map((candidate) =>
-        candidate.id === draft.profileId
-          ? {
-              ...candidate,
-              files: candidate.files.filter((file) => file.path !== draft.relativePath),
-        }
-          : candidate,
-      ),
-    };
-    return { changed, backupId };
-  },
   async previewDeleteProfile(profileId: string, libraryRoot?: string): Promise<LibraryPlan> {
     if (isTauri) return invoke("preview_delete_profile", { profileId, libraryRoot });
     const profile = demoSnapshot.profiles.find((candidate) => candidate.id === profileId);
     const blocked = !profile || profile.isActive;
     const directory = `${demoRoot}/profiles/${profileId}`;
-    const sourceDirectories = new Set<string>();
-    for (const file of profile?.files ?? []) {
-      const parts = file.path.split("/");
-      for (let length = 1; length < parts.length; length += 1) {
-        sourceDirectories.add(`${directory}/${parts.slice(0, length).join("/")}`);
-      }
-    }
-    const directories = [...sourceDirectories].sort(
-      (left, right) => right.split("/").length - left.split("/").length || right.localeCompare(left),
-    );
-    directories.push(directory);
     return {
       operation: "deleteProfile",
       blocked,
-      changeCount: blocked ? 0 : (profile?.files.length ?? 0) + 1 + directories.length,
+      changeCount: blocked ? 0 : 3,
       summary: !profile
         ? `Profile \`${profileId}\` is unavailable.`
         : profile.isActive
           ? `Profile \`${profileId}\` is active on this machine; switch to another Profile before deleting it.`
-          : `Delete inactive Profile \`${profileId}\` and its ${profile.files.length} declared Markdown source(s) after creating a rollback snapshot.`,
+          : `Delete inactive Profile \`${profileId}\` and its AGENTS.md after creating a rollback snapshot.`,
       steps: blocked
         ? []
         : [
-            ...profile.files.map((file) =>
-              step(
-                `${directory}/${file.path}`,
-                "deleteProfileSource",
-                "Delete this declared Markdown source after snapshotting its exact contents.",
-              ),
+            step(
+              `${directory}/AGENTS.md`,
+              "deleteProfileSource",
+              "Back up and delete the Profile’s AGENTS.md.",
             ),
             step(
               `${directory}/profile.json`,
               "deleteProfileManifest",
               "Delete the Profile manifest after every declared source is snapshotted.",
             ),
-            ...directories.map((path) =>
-              step(
-                path,
-                "deleteProfileDirectory",
-                path === directory
-                  ? "Remove the empty Profile directory."
-                  : "Remove this empty Profile source directory.",
-              ),
-            ),
+            step(directory, "deleteProfileDirectory", "Remove the empty Profile directory."),
           ],
     };
   },
@@ -454,11 +319,11 @@ export const backend = {
     };
     return mutation([`${demoRoot}/current`, "<local state>/machine.json"]);
   },
-  async preview(changes: ConnectionChange[], libraryRoot?: string): Promise<ProjectionPlan> {
+  async preview(changes: ConnectionChange[], libraryRoot?: string, projectRoot?: string): Promise<ProjectionPlan> {
     if (isTauri) {
-      return invoke("preview_apply", { changes, libraryRoot });
+      return invoke("preview_apply", { changes, libraryRoot, projectRoot });
     }
-    return buildProjectionPlan(demoSnapshot, changes);
+    return buildProjectionPlan(scopedDemo(projectRoot), changes);
   },
   async openTargets(): Promise<OpenTarget[]> {
     if (isTauri) return invoke("get_open_targets");
@@ -480,12 +345,16 @@ export const backend = {
     changes: ConnectionChange[],
     confirmExistingFiles: boolean,
     libraryRoot?: string,
+    projectRoot?: string,
   ): Promise<ApplyOutcome> {
     if (isTauri) {
-      return invoke("apply_rules", { changes, confirmExistingFiles, libraryRoot });
+      return invoke("apply_rules", { changes, confirmExistingFiles, libraryRoot, projectRoot });
     }
+    const current = scopedDemo(projectRoot);
+    const preview = buildProjectionPlan(current, changes);
+    if (preview.blocked) throw new Error("Projection is blocked.");
     const requested = new Map(changes.map((change) => [change.agentId, change.connected]));
-    const existingFiles = demoSnapshot.agents.filter(
+    const existingFiles = current.agents.filter(
       (agent) =>
         requested.get(agent.id) === true &&
         (agent.targetKind === "independentFile" || agent.targetKind === "invalidManagedFile"),
@@ -494,11 +363,11 @@ export const backend = {
       throw new Error("Confirmation is required before existing files are backed up and replaced.");
     }
     const changed: string[] = [];
-    const before = structuredClone(demoSnapshot);
-    demoSnapshot = {
-      ...demoSnapshot,
+    const before = structuredClone(current);
+    const next: WorkspaceSnapshot = {
+      ...current,
       latestBackup: "demo-apply-snapshot",
-      agents: demoSnapshot.agents.map((agent) => {
+      agents: current.agents.map((agent) => {
         const connected = requested.get(agent.id);
         if (connected !== undefined && connected !== agent.connected) {
           changed.push(agent.id);
@@ -523,7 +392,13 @@ export const backend = {
         return agent;
       }),
     };
-    if (changed.length) demoRollbackSnapshot = before;
+    if (changed.length) {
+      demoRollbackSnapshot = before;
+      demoRollbackProject = projectRoot;
+      if (projectRoot) demoProjects.set(projectRoot, next.agents);
+      else demoSnapshot.agents = next.agents;
+      demoSnapshot.latestBackup = "demo-apply-snapshot";
+    }
     return {
       changed,
       backupId: changed.length ? "demo-apply-snapshot" : undefined,
@@ -537,13 +412,17 @@ export const backend = {
       return invoke("rollback_latest", { libraryRoot });
     }
     if (!demoRollbackSnapshot) throw new Error("No rollback snapshot is available");
-    const current = demoSnapshot;
-    demoSnapshot = { ...demoRollbackSnapshot, latestBackup: undefined };
+    const current = scopedDemo(demoRollbackProject);
+    const originalAgents = demoRollbackSnapshot.agents;
+    if (demoRollbackProject) demoProjects.set(demoRollbackProject, originalAgents);
+    else demoSnapshot.agents = originalAgents;
+    demoSnapshot.latestBackup = undefined;
+    demoRollbackProject = undefined;
     demoRollbackSnapshot = undefined;
     return {
       restored: current.agents
         .filter((agent) => {
-          const original = demoSnapshot.agents.find((candidate) => candidate.id === agent.id);
+          const original = originalAgents.find((candidate) => candidate.id === agent.id);
           return original?.connected !== agent.connected;
         })
         .map((agent) => agent.targetPath),

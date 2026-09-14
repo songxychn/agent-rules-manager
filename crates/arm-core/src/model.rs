@@ -19,6 +19,10 @@ pub struct AgentAdapter {
     pub note: String,
     pub command_names: Vec<String>,
     pub detection_paths: Vec<PathBuf>,
+    pub aliases: Vec<String>,
+    pub scope: String,
+    pub docs_url: String,
+    pub max_chars: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -54,6 +58,11 @@ pub struct AgentStatus {
     pub installed: bool,
     pub connected: bool,
     pub detection_detail: String,
+    pub warning: Option<String>,
+    pub scope: String,
+    pub note: String,
+    pub docs_url: String,
+    pub max_chars: Option<usize>,
     pub detail: String,
 }
 

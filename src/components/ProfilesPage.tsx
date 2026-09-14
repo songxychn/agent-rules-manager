@@ -8,7 +8,6 @@ import type {
   LibraryPlan,
   OpenTarget,
   ProfileDraft,
-  ProfileFileDraft,
   ProfileSummary,
   RuntimeState,
 } from "../lib/types";
@@ -27,15 +26,12 @@ interface ProfilesPageProps {
   onOpen: (profileId: string, path: string, targetId: string) => void;
   onPrepareCreate: (draft: ProfileDraft) => Promise<LibraryPlan>;
   onCreate: (draft: ProfileDraft) => Promise<void>;
-  onPrepareAddFile: (draft: ProfileFileDraft) => Promise<LibraryPlan>;
-  onAddFile: (draft: ProfileFileDraft) => Promise<void>;
-  onPrepareRemoveFile: (draft: ProfileFileDraft) => Promise<LibraryPlan>;
-  onRemoveFile: (draft: ProfileFileDraft) => Promise<void>;
   onPrepareDelete: (profileId: string) => Promise<LibraryPlan>;
   onDelete: (profileId: string) => Promise<void>;
   onPrepareActivate: (profileId: string) => Promise<LibraryPlan>;
   onActivate: (profileId: string) => Promise<void>;
   onRollback: () => Promise<void>;
+  onError: (message: string) => void;
 }
 
 const emptyDraft: ProfileDraft = { id: "", name: "", description: "" };
@@ -50,25 +46,16 @@ export function ProfilesPage({
   onOpen,
   onPrepareCreate,
   onCreate,
-  onPrepareAddFile,
-  onAddFile,
-  onPrepareRemoveFile,
-  onRemoveFile,
   onPrepareDelete,
   onDelete,
   onPrepareActivate,
   onActivate,
   onRollback,
+  onError,
 }: ProfilesPageProps) {
   const { t } = useI18n();
   const [draft, setDraft] = useState<ProfileDraft>(emptyDraft);
   const [createPlan, setCreatePlan] = useState<LibraryPlan>();
-  const [fileDraft, setFileDraft] = useState<ProfileFileDraft>();
-  const [filePlan, setFilePlan] = useState<{ profileId: string; plan: LibraryPlan }>();
-  const [fileRemoval, setFileRemoval] = useState<{
-    draft: ProfileFileDraft;
-    plan: LibraryPlan;
-  }>();
   const [activation, setActivation] = useState<{ profileId: string; plan: LibraryPlan }>();
   const [deletion, setDeletion] = useState<{ profileId: string; plan: LibraryPlan }>();
   const [busy, setBusy] = useState<string>();
@@ -103,6 +90,7 @@ export function ProfilesPage({
       await action();
     } catch (cause) {
       setError(String(cause));
+      onError(String(cause));
     } finally {
       setBusy(undefined);
     }
@@ -153,46 +141,9 @@ export function ProfilesPage({
     }
   };
 
-  const requestFileAdd = (nextDraft: ProfileFileDraft) =>
-    run(`prepare-file-${nextDraft.profileId}`, async () => {
-      setActivation(undefined);
-      setDeletion(undefined);
-      setFileRemoval(undefined);
-      setFilePlan({
-        profileId: nextDraft.profileId,
-        plan: await onPrepareAddFile(nextDraft),
-      });
-    });
-
-  const addFile = (nextDraft: ProfileFileDraft) =>
-    run(`add-file-${nextDraft.profileId}`, async () => {
-      await onAddFile(nextDraft);
-      setFileDraft(undefined);
-      setFilePlan(undefined);
-    });
-
-  const requestFileRemoval = (nextDraft: ProfileFileDraft) =>
-    run(`prepare-remove-file-${nextDraft.profileId}`, async () => {
-      setActivation(undefined);
-      setDeletion(undefined);
-      setFileDraft(undefined);
-      setFilePlan(undefined);
-      setFileRemoval({
-        draft: nextDraft,
-        plan: await onPrepareRemoveFile(nextDraft),
-      });
-    });
-
-  const removeFile = (nextDraft: ProfileFileDraft) =>
-    run(`remove-file-${nextDraft.profileId}`, async () => {
-      await onRemoveFile(nextDraft);
-      setFileRemoval(undefined);
-    });
-
   const requestActivation = (profileId: string) =>
     run(`prepare-activation-${profileId}`, async () => {
       setDeletion(undefined);
-      setFileRemoval(undefined);
       setActivation({ profileId, plan: await onPrepareActivate(profileId) });
     });
 
@@ -205,9 +156,6 @@ export function ProfilesPage({
   const requestDeletion = (profileId: string) =>
     run(`prepare-delete-${profileId}`, async () => {
       setActivation(undefined);
-      setFileDraft(undefined);
-      setFilePlan(undefined);
-      setFileRemoval(undefined);
       setDeletion({ profileId, plan: await onPrepareDelete(profileId) });
     });
 
@@ -277,16 +225,11 @@ export function ProfilesPage({
         />
       )}
 
-      {error && !createOpen && <p className="form-error page-error" role="alert">{error}</p>}
-
       <div className="library-page-grid">
         <section className="profile-patch-sheet" aria-label={t("profiles.listLabel")}>
           {profiles.map((profile, index) => {
             const activationPending = activation?.profileId === profile.id;
             const deletionPending = deletion?.profileId === profile.id;
-            const editingFile = fileDraft?.profileId === profile.id;
-            const fileConfirmationPending = filePlan?.profileId === profile.id;
-            const fileRemovalPending = fileRemoval?.draft.profileId === profile.id;
 
             return (
               <article className={`profile-route-card ${profile.isActive ? "is-active" : ""}`} key={profile.id}>
@@ -300,135 +243,20 @@ export function ProfilesPage({
                   {profile.isActive && <span className="active-machine-badge">{t("profiles.activeHere")}</span>}
                 </header>
 
-                <div className="profile-files-heading">
-                  <span>{t("profiles.files")}</span>
-                  <small>{t("profiles.fileCount", { count: profile.files.length })}</small>
-                </div>
-                <ol className="pack-file-list profile-file-list">
-                  {profile.files.map((file, fileIndex) => (
-                    <li key={file.path}>
-                      <span className="file-order">{String(fileIndex + 1).padStart(2, "0")}</span>
-                      <span className="file-route-line" aria-hidden="true" />
-                      <div>
-                        <strong>{file.path}</strong>
-                        <code>profiles/{profile.id}/{file.path}</code>
-                      </div>
-                      <small>{fileIndex === 0 ? t("profiles.required") : file.digest.slice(0, 8)}</small>
-                      <div className="profile-file-actions">
-                        <SourceOpenControl
-                          fileName={file.path}
-                          actionLabel={t("profiles.open")}
-                          targets={openTargets}
-                          preferredTargetId={preferredOpenTargetId}
-                          openingTargetId={openingTargetId}
-                          onOpen={(targetId) => onOpen(profile.id, file.path, targetId)}
-                        />
-                        {fileIndex > 0 && (
-                          <button
-                            className="profile-source-delete"
-                            aria-label={t("profiles.removeFileLabel", { path: file.path })}
-                            title={t("profiles.removeFileLabel", { path: file.path })}
-                            disabled={Boolean(busy)}
-                            onClick={() => void requestFileRemoval({
-                              profileId: profile.id,
-                              relativePath: file.path,
-                            })}
-                          >
-                            {t("profiles.removeFile")}
-                          </button>
-                        )}
-                      </div>
-                    </li>
-                  ))}
-                </ol>
-
-                {fileRemovalPending && (
-                  <LibraryChangeConfirm
-                    plan={fileRemoval.plan}
-                    tone="danger"
-                    title={t("profiles.removeFileQuestion")}
-                    description={t("profiles.removeFilePrompt", {
-                      profile: profile.name,
-                      path: fileRemoval.draft.relativePath,
-                    })}
-                    confirming={busy === `remove-file-${profile.id}`}
-                    confirmLabel={t("profiles.removeFileConfirm")}
-                    onCancel={() => setFileRemoval(undefined)}
-                    onConfirm={() => void removeFile(fileRemoval.draft)}
-                  />
-                )}
-
-                <div className="profile-output-strip">
-                  <span aria-hidden="true">{profile.files.map(() => "·").join(" ")}</span>
-                  <strong>{t("profiles.output")}</strong>
-                  <code>current/AGENTS.md</code>
-                </div>
-
-                {!editingFile && (
-                  <button
-                    className="inline-action add-file-action"
-                    disabled={Boolean(busy)}
-                    onClick={() => {
-                      setActivation(undefined);
-                      setDeletion(undefined);
-                      setFileRemoval(undefined);
-                      setFileDraft({ profileId: profile.id, relativePath: "rules/" });
-                      setFilePlan(undefined);
-                    }}
-                  >
-                    {t("profiles.addFile")}
-                  </button>
-                )}
-
-                {editingFile && fileDraft && (
-                  <div className="pack-file-composer profile-file-composer">
-                    <div>
-                      <span>{t("profiles.addFileTitle")}</span>
-                      <code>profiles/{profile.id}/</code>
-                    </div>
-                    <input
-                      aria-label={t("profiles.addFilePath")}
-                      value={fileDraft.relativePath}
-                      onChange={(event) => {
-                        setFileDraft({ ...fileDraft, relativePath: event.target.value });
-                        setFilePlan(undefined);
-                      }}
-                    />
-                    {!fileConfirmationPending && (
-                      <div className="pack-file-composer-actions">
-                        <button
-                          className="button button-ghost button-small"
-                          onClick={() => setFileDraft(undefined)}
-                        >
-                          {t("libraryPlan.cancel")}
-                        </button>
-                        <button
-                          className="button button-primary button-small"
-                          disabled={!fileDraft.relativePath || Boolean(busy)}
-                          onClick={() => void requestFileAdd(fileDraft)}
-                        >
-                          {busy === `prepare-file-${profile.id}`
-                            ? t("libraryPlan.preparing")
-                            : t("profiles.addFileSubmit")}
-                        </button>
-                      </div>
-                    )}
-                    {fileConfirmationPending && (
-                      <LibraryChangeConfirm
-                        plan={filePlan.plan}
-                        title={t("profiles.addFileQuestion")}
-                        description={t("profiles.addFilePrompt", {
-                          profile: profile.name,
-                          path: fileDraft.relativePath,
-                        })}
-                        confirming={busy === `add-file-${profile.id}`}
-                        confirmLabel={t("profiles.addFileConfirm")}
-                        onCancel={() => setFilePlan(undefined)}
-                        onConfirm={() => void addFile(fileDraft)}
-                      />
-                    )}
+                <div className="profile-rule-file">
+                  <div>
+                    <strong>AGENTS.md</strong>
+                    <code>profiles/{profile.id}/AGENTS.md</code>
                   </div>
-                )}
+                  <SourceOpenControl
+                    fileName="AGENTS.md"
+                    actionLabel={t("profiles.open")}
+                    targets={openTargets}
+                    preferredTargetId={preferredOpenTargetId}
+                    openingTargetId={openingTargetId}
+                    onOpen={(targetId) => onOpen(profile.id, "AGENTS.md", targetId)}
+                  />
+                </div>
 
                 <footer>
                   <span className={`runtime-state runtime-${profile.isActive ? runtimeState : "missing"}`}>
@@ -487,7 +315,6 @@ export function ProfilesPage({
                     title={t("profiles.deleteQuestion", { profile: profile.name })}
                     description={t("profiles.deletePrompt", {
                       profile: profile.name,
-                      count: profile.files.length,
                     })}
                     confirming={busy === `delete-${profile.id}`}
                     confirmLabel={t("profiles.deleteConfirm")}
@@ -558,12 +385,10 @@ export function ProfilesPage({
                 </label>
 
                 <div className="required-entry-readout">
-                  <span>01</span>
                   <div>
                     <strong>AGENTS.md</strong>
                     <small>{t("profiles.create.entrypoint")}</small>
                   </div>
-                  <em>{t("profiles.required")}</em>
                 </div>
 
                 <button

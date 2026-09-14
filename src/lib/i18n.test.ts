@@ -36,7 +36,6 @@ describe("i18n", () => {
   it("uses direct actions followed by confirmation language", () => {
     const primaryActions = [
       "profiles.rollback",
-      "profiles.addFileSubmit",
       "profiles.switch",
       "profiles.refresh",
       "profiles.create.submit",
@@ -45,6 +44,6 @@ describe("i18n", () => {
     for (const key of primaryActions) {
       expect(translate("zh-CN", key)).not.toContain("预览");
     }
-    expect(translate("zh-CN", "profiles.removeFileConfirm")).toBe("确认删除");
+    expect(translate("zh-CN", "profiles.deleteConfirm")).toBe("确认删除");
   });
 });
