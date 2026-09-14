@@ -21,6 +21,11 @@ export interface AgentStatus {
   installed: boolean;
   connected: boolean;
   detectionDetail: string;
+  scope?: "global" | "project";
+  note?: string;
+  docsUrl?: string;
+  maxChars?: number;
+  warning?: string;
   detail: string;
 }
 
@@ -122,9 +127,4 @@ export interface ProfileDraft {
   id: string;
   name: string;
   description: string;
-}
-
-export interface ProfileFileDraft {
-  profileId: string;
-  relativePath: string;
 }

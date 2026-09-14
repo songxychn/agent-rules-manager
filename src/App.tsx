@@ -2,7 +2,10 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppIcon, BrandMark } from "./components/AppIcon";
 import { LibrarySetupPanel } from "./components/LibrarySetupPanel";
 import { ProfilesPage } from "./components/ProfilesPage";
+import { AgentScopePanel } from "./components/AgentScopePanel";
 import { ProjectionRail } from "./components/ProjectionRail";
+import { NotificationCenter } from "./components/NotificationCenter";
+import { useNotifications } from "./lib/notifications";
 import { SettingsPage } from "./components/SettingsPage";
 import { backend } from "./lib/backend";
 import { useI18n } from "./lib/i18n";
@@ -12,14 +15,12 @@ import type {
   LibraryPlan,
   OpenTarget,
   ProfileDraft,
-  ProfileFileDraft,
   ProjectionPlan,
   WorkspaceSnapshot,
 } from "./lib/types";
 import "./styles.css";
 
 type View = "control" | "profiles" | "settings";
-type Notice = { tone: "success" | "error" | "info"; message: string };
 
 function workspaceFingerprint(snapshot: WorkspaceSnapshot | undefined): string {
   if (!snapshot) return "";
@@ -44,6 +45,7 @@ function workspaceFingerprint(snapshot: WorkspaceSnapshot | undefined): string {
       agent.targetKind,
       agent.installed,
       agent.connected,
+      agent.warning,
     ]),
   });
 }
@@ -57,7 +59,7 @@ function connectionChanges(
   desiredConnections: Set<string>,
 ): ConnectionChange[] {
   return snapshot.agents
-    .filter((agent) => agent.installed || agent.connected)
+    .filter((agent) => agent.installed || agent.connected || agent.scope === "project")
     .filter(
       (agent) =>
         desiredConnections.has(agent.id) !== agent.connected ||
@@ -73,6 +75,8 @@ function App() {
   const { t } = useI18n();
   const [view, setView] = useState<View>("control");
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
+  const [projectRoot, setProjectRoot] = useState("");
+  const projectRootRef = useRef("");
   const [libraryRoot, setLibraryRoot] = useState("");
   const [libraryInput, setLibraryInput] = useState("");
   const [plan, setPlan] = useState<ProjectionPlan>();
@@ -82,14 +86,17 @@ function App() {
   const [preferredOpenTarget, setPreferredOpenTarget] = useState(readPreferredOpenTarget);
   const [openingTargetId, setOpeningTargetId] = useState<string>();
   const [busy, setBusy] = useState<string>();
-  const [notice, setNotice] = useState<Notice>();
+  const notifications = useNotifications();
+  const { notify } = notifications;
   const snapshotRef = useRef<WorkspaceSnapshot>();
   const refreshInFlight = useRef(false);
 
   const loadSnapshot = useCallback(async (root?: string) => {
     setBusy("loading");
+    const requestedProject = projectRootRef.current;
     try {
-      const next = await backend.snapshot(root || undefined);
+      const next = await backend.snapshot(root || undefined, requestedProject || undefined);
+      if (requestedProject !== projectRootRef.current) return;
       snapshotRef.current = next;
       setSnapshot(next);
       setLibraryRoot(next.libraryRoot);
@@ -98,11 +105,11 @@ function App() {
       setPlan(undefined);
       setSetupPlan(undefined);
     } catch (error) {
-      setNotice({ tone: "error", message: String(error) });
+      notify({ tone: "error", message: String(error) });
     } finally {
       setBusy(undefined);
     }
-  }, []);
+  }, [notify]);
 
   useEffect(() => {
     void loadSnapshot();
@@ -112,18 +119,20 @@ function App() {
     void backend
       .openTargets()
       .then(setOpenTargets)
-      .catch((error) => setNotice({ tone: "error", message: String(error) }));
-  }, []);
+      .catch((error) => notify({ tone: "error", message: String(error) }));
+  }, [notify]);
 
   const refreshWorkspace = useCallback(
     async () => {
       if (!libraryRoot || refreshInFlight.current) return;
       refreshInFlight.current = true;
+      const requestedProject = projectRootRef.current;
       try {
         const [next, nextOpenTargets] = await Promise.all([
-          backend.snapshot(libraryRoot),
+          backend.snapshot(libraryRoot, requestedProject || undefined),
           backend.openTargets(),
         ]);
+        if (requestedProject !== projectRootRef.current) return;
         const changed = workspaceFingerprint(snapshotRef.current) !== workspaceFingerprint(next);
         snapshotRef.current = next;
         setSnapshot(next);
@@ -134,12 +143,12 @@ function App() {
           setSetupPlan(undefined);
         }
       } catch (error) {
-        setNotice({ tone: "error", message: String(error) });
+        notify({ tone: "error", message: String(error) });
       } finally {
         refreshInFlight.current = false;
       }
     },
-    [libraryRoot],
+    [libraryRoot, notify],
   );
 
   useEffect(() => {
@@ -157,15 +166,14 @@ function App() {
     if (!current) return;
     const changes = connectionChanges(current, desiredConnections);
     if (!changes.length) {
-      setNotice({ tone: "info", message: t("notice.noConnectionChanges") });
+      notify({ tone: "info", message: t("notice.noConnectionChanges") });
       return;
     }
     setBusy("planning");
-    setNotice(undefined);
     try {
-      setPlan(await backend.preview(changes, libraryRoot));
+      setPlan(await backend.preview(changes, libraryRoot, projectRoot || undefined));
     } catch (error) {
-      setNotice({ tone: "error", message: String(error) });
+      notify({ tone: "error", message: String(error) });
     } finally {
       setBusy(undefined);
     }
@@ -180,8 +188,8 @@ function App() {
     if (!changes.length) return;
     setBusy("applying");
     try {
-      const outcome = await backend.apply(changes, plan.confirmationCount > 0, libraryRoot);
-      setNotice({
+      const outcome = await backend.apply(changes, plan.confirmationCount > 0, libraryRoot, projectRoot || undefined);
+      notify({
         tone: "success",
         message: outcome.changed.length
           ? outcome.preservedBackupDir
@@ -194,7 +202,7 @@ function App() {
       });
       await loadSnapshot(libraryRoot);
     } catch (error) {
-      setNotice({ tone: "error", message: String(error) });
+      notify({ tone: "error", message: String(error) });
     } finally {
       setBusy(undefined);
     }
@@ -204,10 +212,10 @@ function App() {
     setBusy("rollback");
     try {
       const outcome = await backend.rollback(libraryRoot);
-      setNotice({ tone: "success", message: t("notice.restored", { id: outcome.backupId }) });
+      notify({ tone: "success", message: t("notice.restored", { id: outcome.backupId }) });
       await loadSnapshot(libraryRoot);
     } catch (error) {
-      setNotice({ tone: "error", message: String(error) });
+      notify({ tone: "error", message: String(error) });
     } finally {
       setBusy(undefined);
     }
@@ -218,7 +226,7 @@ function App() {
     try {
       setSetupPlan(await backend.previewInitialize(libraryRoot || undefined));
     } catch (error) {
-      setNotice({ tone: "error", message: String(error) });
+      notify({ tone: "error", message: String(error) });
     } finally {
       setBusy(undefined);
     }
@@ -229,9 +237,9 @@ function App() {
     try {
       await backend.initialize(libraryRoot || undefined);
       await loadSnapshot(libraryRoot || undefined);
-      setNotice({ tone: "success", message: t("notice.initialized") });
+      notify({ tone: "success", message: t("notice.initialized") });
     } catch (error) {
-      setNotice({ tone: "error", message: String(error) });
+      notify({ tone: "error", message: String(error) });
       setBusy(undefined);
     }
   };
@@ -248,7 +256,7 @@ function App() {
     setOpeningTargetId(targetId);
     try {
       const opened = await backend.openRuleSource(targetId, profileId, relativePath, libraryRoot);
-      setNotice(
+      notify(
         opened
           ? {
               tone: "success",
@@ -260,7 +268,7 @@ function App() {
           : { tone: "info", message: t("notice.demoOpen") },
       );
     } catch (error) {
-      setNotice({ tone: "error", message: String(error) });
+      notify({ tone: "error", message: String(error) });
     } finally {
       setOpeningTargetId(undefined);
     }
@@ -269,48 +277,31 @@ function App() {
   const createProfile = async (draft: ProfileDraft) => {
     await backend.createProfile(draft, libraryRoot);
     await loadSnapshot(libraryRoot);
-    setNotice({ tone: "success", message: t("notice.profileCreated", { name: draft.name }) });
-  };
-
-  const addProfileFile = async (draft: ProfileFileDraft) => {
-    await backend.addProfileFile(draft, libraryRoot);
-    await loadSnapshot(libraryRoot);
-    setNotice({
-      tone: "success",
-      message: t("notice.profileFileAdded", { path: draft.relativePath }),
-    });
-  };
-
-  const removeProfileFile = async (draft: ProfileFileDraft) => {
-    await backend.removeProfileFile(draft, libraryRoot);
-    await loadSnapshot(libraryRoot);
-    setNotice({
-      tone: "success",
-      message: t("notice.profileFileRemoved", { path: draft.relativePath }),
-    });
+    notify({ tone: "success", message: t("notice.profileCreated", { name: draft.name }) });
   };
 
   const deleteProfile = async (profileId: string) => {
     await backend.deleteProfile(profileId, libraryRoot);
     await loadSnapshot(libraryRoot);
-    setNotice({ tone: "success", message: t("notice.profileDeleted", { id: profileId }) });
+    notify({ tone: "success", message: t("notice.profileDeleted", { id: profileId }) });
   };
 
   const activateProfile = async (profileId: string) => {
     await backend.activateProfile(profileId, libraryRoot);
     await loadSnapshot(libraryRoot);
-    setNotice({ tone: "success", message: t("notice.profileActivated", { id: profileId }) });
+    notify({ tone: "success", message: t("notice.profileActivated", { id: profileId }) });
   };
 
   const rollbackLibrary = async () => {
     const outcome = await backend.rollbackLibrary(libraryRoot);
     await loadSnapshot(libraryRoot);
-    setNotice({ tone: "success", message: t("notice.libraryRestored", { id: outcome.backupId }) });
+    notify({ tone: "success", message: t("notice.libraryRestored", { id: outcome.backupId }) });
   };
 
   if (!snapshot) {
     return (
       <main className="loading-screen">
+        <div className="loading-notifications"><NotificationCenter {...notifications} /></div>
         <BrandMark />
         <p>{busy === "loading" ? t("loading.inspecting") : t("loading.failed")}</p>
       </main>
@@ -344,15 +335,12 @@ function App() {
             void openRuleSource(targetId, profileId, relativePath)}
           onPrepareCreate={(draft) => backend.previewCreateProfile(draft, libraryRoot)}
           onCreate={createProfile}
-          onPrepareAddFile={(draft) => backend.previewAddProfileFile(draft, libraryRoot)}
-          onAddFile={addProfileFile}
-          onPrepareRemoveFile={(draft) => backend.previewRemoveProfileFile(draft, libraryRoot)}
-          onRemoveFile={removeProfileFile}
           onPrepareDelete={(profileId) => backend.previewDeleteProfile(profileId, libraryRoot)}
           onDelete={deleteProfile}
           onPrepareActivate={(profileId) => backend.previewActivateProfile(profileId, libraryRoot)}
           onActivate={activateProfile}
           onRollback={rollbackLibrary}
+          onError={(message) => notify({ tone: "error", message })}
         />
       );
     }
@@ -371,6 +359,24 @@ function App() {
     }
     return (
       <>
+        <AgentScopePanel
+          projectRoot={projectRoot}
+          disabled={Boolean(busy)}
+          onChange={async (nextRoot) => {
+            setBusy("loading");
+            try {
+              const next = await backend.snapshot(libraryRoot, nextRoot || undefined);
+              projectRootRef.current = nextRoot;
+              setProjectRoot(nextRoot);
+              snapshotRef.current = next;
+              setSnapshot(next);
+              setDesiredConnections(currentConnections(next));
+              setPlan(undefined);
+            } catch (error) {
+              notify({ tone: "error", message: String(error) });
+            } finally { setBusy(undefined); }
+          }}
+        />
         <ProjectionRail
           agents={snapshot.agents}
           sourceDigest={snapshot.sourceDigest}
@@ -474,6 +480,7 @@ function App() {
             </button>
           </div>
           <div className="topbar-actions">
+            <NotificationCenter {...notifications} />
             {!backend.isTauri && <span className="runtime-badge">{t("runtime.demo")}</span>}
             {view === "control" && (
               <button
@@ -489,13 +496,6 @@ function App() {
         </header>
 
         <main className="workspace">
-          {notice && (
-            <div className={`notice notice-${notice.tone}`} role="status">
-              <span>{notice.message}</span>
-              <button onClick={() => setNotice(undefined)} aria-label={t("notice.dismiss")}>×</button>
-            </div>
-          )}
-
           {snapshot.libraryState !== "ready" && view !== "settings" ? (
             <LibrarySetupPanel
               state={snapshot.libraryState}

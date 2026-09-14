@@ -23,12 +23,32 @@ fn build_manager(app: &AppHandle, library_root: Option<String>) -> Result<RulesM
     Ok(RulesManager::new(root, state_root, &home))
 }
 
+fn build_projection_manager(
+    app: &AppHandle,
+    library_root: Option<String>,
+    project_root: Option<String>,
+) -> Result<RulesManager, String> {
+    let manager = build_manager(app, library_root)?;
+    match project_root.filter(|path| !path.trim().is_empty()) {
+        Some(project) => {
+            let home = env::var_os("HOME")
+                .map(PathBuf::from)
+                .ok_or("HOME is not set")?;
+            manager
+                .for_project(&home, &PathBuf::from(project))
+                .map_err(|e| e.to_string())
+        }
+        None => Ok(manager),
+    }
+}
+
 #[tauri::command]
 fn get_workspace_snapshot(
     app: AppHandle,
     library_root: Option<String>,
+    project_root: Option<String>,
 ) -> Result<WorkspaceSnapshot, String> {
-    build_manager(&app, library_root)?
+    build_projection_manager(&app, library_root, project_root)?
         .snapshot()
         .map_err(|error| error.to_string())
 }
@@ -73,54 +93,6 @@ fn create_profile(
 ) -> Result<LibraryMutationOutcome, String> {
     build_manager(&app, library_root)?
         .create_profile(&id, &name, &description)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn preview_add_profile_file(
-    app: AppHandle,
-    library_root: Option<String>,
-    profile_id: String,
-    relative_path: String,
-) -> Result<LibraryPlan, String> {
-    build_manager(&app, library_root)?
-        .plan_add_profile_file(&profile_id, &relative_path)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn add_profile_file(
-    app: AppHandle,
-    library_root: Option<String>,
-    profile_id: String,
-    relative_path: String,
-) -> Result<LibraryMutationOutcome, String> {
-    build_manager(&app, library_root)?
-        .add_profile_file(&profile_id, &relative_path)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn preview_remove_profile_file(
-    app: AppHandle,
-    library_root: Option<String>,
-    profile_id: String,
-    relative_path: String,
-) -> Result<LibraryPlan, String> {
-    build_manager(&app, library_root)?
-        .plan_remove_profile_file(&profile_id, &relative_path)
-        .map_err(|error| error.to_string())
-}
-
-#[tauri::command]
-fn remove_profile_file(
-    app: AppHandle,
-    library_root: Option<String>,
-    profile_id: String,
-    relative_path: String,
-) -> Result<LibraryMutationOutcome, String> {
-    build_manager(&app, library_root)?
-        .remove_profile_file(&profile_id, &relative_path)
         .map_err(|error| error.to_string())
 }
 
@@ -172,9 +144,10 @@ fn activate_profile(
 fn preview_apply(
     app: AppHandle,
     library_root: Option<String>,
+    project_root: Option<String>,
     changes: Vec<ConnectionChange>,
 ) -> Result<ProjectionPlan, String> {
-    build_manager(&app, library_root)?
+    build_projection_manager(&app, library_root, project_root)?
         .plan_connections(&changes)
         .map_err(|error| error.to_string())
 }
@@ -202,10 +175,11 @@ fn open_rule_source(
 fn apply_rules(
     app: AppHandle,
     library_root: Option<String>,
+    project_root: Option<String>,
     changes: Vec<ConnectionChange>,
     confirm_existing_files: bool,
 ) -> Result<ApplyOutcome, String> {
-    build_manager(&app, library_root)?
+    build_projection_manager(&app, library_root, project_root)?
         .apply_connections_confirmed(&changes, confirm_existing_files)
         .map_err(|error| error.to_string())
 }
@@ -240,10 +214,6 @@ pub fn run() {
             initialize_library,
             preview_create_profile,
             create_profile,
-            preview_add_profile_file,
-            add_profile_file,
-            preview_remove_profile_file,
-            remove_profile_file,
             preview_delete_profile,
             delete_profile,
             preview_activate_profile,
