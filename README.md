@@ -259,6 +259,8 @@ bun run tauri dev
 bun run tauri:build
 ```
 
+应用图标的源文件是 `assets/icon-source.svg`。修改图案后，运行 `bun run tauri icon assets/icon-source.svg` 生成通用资源，再运行 `bun run icons:macos` 更新 macOS 的 `icon.icns`。macOS 图案占画布的 80%，四边各留 10% 透明边距，使 Dock 中的视觉大小与其他图标接近；后一个命令只更新 macOS 资源。
+
 桌面端只允许用固定打开目标处理后端重新校验过的 Profile 文件；WebView 不能提交任意可执行文件或绝对路径。普通 `bun run dev` 使用纯内存演示数据，不读取或修改真实用户目录，也不会启动本地应用。
 
 ## 项目结构

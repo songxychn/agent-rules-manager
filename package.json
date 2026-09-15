@@ -9,6 +9,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
+    "icons:macos": "bun tools/generate-macos-icon.ts",
     "tauri": "bun tools/tauri.ts",
     "tauri:build": "bun tools/tauri.ts build"
   },
