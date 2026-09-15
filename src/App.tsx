@@ -9,6 +9,7 @@ import { NotificationCenter } from "./components/NotificationCenter";
 import { useNotifications } from "./lib/notifications";
 import { SettingsPage } from "./components/SettingsPage";
 import { backend } from "./lib/backend";
+import { checkForAppUpdate } from "./lib/appUpdate";
 import { useI18n } from "./lib/i18n";
 import { readPreferredOpenTarget, writePreferredOpenTarget } from "./lib/openTargets";
 import type {
@@ -122,6 +123,25 @@ function App() {
       .then(setOpenTargets)
       .catch((error) => notify({ tone: "error", message: String(error) }));
   }, [notify]);
+
+  useEffect(() => {
+    if (!backend.isTauri) return;
+    let cancelled = false;
+    void checkForAppUpdate()
+      .then((result) => {
+        if (cancelled || result.status !== "available") return;
+        notify({
+          tone: "info",
+          message: t("settings.update.available", { version: result.version }),
+        });
+      })
+      .catch(() => {
+        // Startup update checks stay silent; Settings can retry with a visible error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [notify, t]);
 
   const refreshWorkspace = useCallback(
     async () => {

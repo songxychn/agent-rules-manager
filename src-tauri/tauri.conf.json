@@ -27,6 +27,40 @@
     }
   },
   "bundle": {
-    "active": false
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "targets": ["dmg", "nsis", "deb", "appimage"],
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ],
+    "publisher": "Baizhukui",
+    "copyright": "Copyright (c) 2026 Baizhukui",
+    "category": "DeveloperTool",
+    "shortDescription": "Local-first rules manager for coding agents",
+    "longDescription": "Manage machine-local rule profiles and project them safely onto Codex, Claude Code, Cursor, Copilot, and other coding agents. Preview every write, back up existing files before takeover, and refuse rollback when files have drifted.",
+    "macOS": {
+      "hardenedRuntime": true,
+      "minimumSystemVersion": "12.0"
+    },
+    "windows": {
+      "nsis": {
+        "installMode": "currentUser"
+      }
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEJDMjVDOTM5RUZERkQyQzMKUldURDB0L3ZPY2tsdkhEVW50ODJNT1o1NzY3R1RzdG04eUtTcXg4TXF4emZQb21ZeHpWaUxxSXcK",
+      "endpoints": [
+        "https://github.com/songxychn/agent-rules-manager/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

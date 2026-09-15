@@ -31,6 +31,9 @@ describe("i18n", () => {
       "Restored snapshot snapshot-1.",
     );
     expect(translate("zh-CN", "rollback.tooltip")).toContain("不会修改规则源 AGENTS.md");
+    expect(translate("zh-CN", "settings.update.available", { version: "0.2.0" })).toBe(
+      "版本 0.2.0 可以安装。",
+    );
   });
 
   it("uses direct actions followed by confirmation language", () => {

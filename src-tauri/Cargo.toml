@@ -15,5 +15,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 arm-core.workspace = true
 serde.workspace = true
+serde_json.workspace = true
 tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2.5.4"
+tauri-plugin-process = "2.3.1"
+tauri-plugin-updater = "2.11.0"

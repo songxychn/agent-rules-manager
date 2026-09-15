@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, BTreeSet};
 use std::env;
+use std::ffi::OsString;
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
@@ -778,10 +779,12 @@ impl RulesManager {
 }
 
 pub fn default_library_root() -> Result<PathBuf, ArmError> {
-    let home = home_dir()?;
+    let home = default_home_dir()?;
     Ok(library_root_for(
         &home,
-        env::var_os("AGENT_RULES_HOME").map(PathBuf::from),
+        env::var_os("AGENT_RULES_HOME")
+            .filter(|value| !value.is_empty())
+            .map(PathBuf::from),
     ))
 }
 
@@ -790,27 +793,49 @@ fn library_root_for(home: &Path, configured: Option<PathBuf>) -> PathBuf {
 }
 
 pub fn default_state_root() -> Result<PathBuf, ArmError> {
-    if let Some(root) = env::var_os("AGENT_RULES_STATE_HOME") {
+    if let Some(root) = env::var_os("AGENT_RULES_STATE_HOME").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(root));
     }
-    let home = home_dir()?;
-    #[cfg(target_os = "macos")]
-    {
-        Ok(home.join("Library/Application Support/agent-rules-manager"))
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        Ok(env::var_os("XDG_STATE_HOME")
-            .map(PathBuf::from)
-            .unwrap_or_else(|| home.join(".local/state"))
-            .join("agent-rules-manager"))
-    }
+    Ok(platform_state_root(&default_home_dir()?))
 }
 
-fn home_dir() -> Result<PathBuf, ArmError> {
-    env::var_os("HOME")
+pub fn default_home_dir() -> Result<PathBuf, ArmError> {
+    resolve_home_dir(env::var_os("HOME"), env::var_os("USERPROFILE"))
+}
+
+fn resolve_home_dir(
+    home: Option<OsString>,
+    userprofile: Option<OsString>,
+) -> Result<PathBuf, ArmError> {
+    nonempty_os(home)
+        .or_else(|| nonempty_os(userprofile))
         .map(PathBuf::from)
-        .ok_or_else(|| ArmError::MissingSource("HOME is not set".into()))
+        .ok_or_else(|| ArmError::MissingSource("home directory is not set".into()))
+}
+
+fn nonempty_os(value: Option<OsString>) -> Option<OsString> {
+    value.filter(|value| !value.is_empty())
+}
+
+fn platform_state_root(home: &Path) -> PathBuf {
+    #[cfg(target_os = "macos")]
+    {
+        home.join("Library/Application Support/agent-rules-manager")
+    }
+    #[cfg(target_os = "windows")]
+    {
+        nonempty_os(env::var_os("APPDATA"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join("AppData").join("Roaming"))
+            .join("agent-rules-manager")
+    }
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        nonempty_os(env::var_os("XDG_STATE_HOME"))
+            .map(PathBuf::from)
+            .unwrap_or_else(|| home.join(".local/state"))
+            .join("agent-rules-manager")
+    }
 }
 
 fn absolute_logical_path(path: &Path) -> Result<PathBuf, ArmError> {
@@ -1282,7 +1307,19 @@ fn create_symlink(source: &Path, target: &Path) -> Result<(), ArmError> {
 #[cfg(windows)]
 fn create_symlink(source: &Path, target: &Path) -> Result<(), ArmError> {
     std::os::windows::fs::symlink_file(source, target)
-        .map_err(|error| ArmError::io(target.display().to_string(), error))
+        .map_err(|error| windows_symlink_error(target, error))
+}
+
+#[cfg(windows)]
+fn windows_symlink_error(path: &Path, error: std::io::Error) -> ArmError {
+    if error.raw_os_error() == Some(1314) {
+        ArmError::Blocked(format!(
+            "Windows requires Developer Mode or administrator rights to create a symbolic link at {}",
+            path.display()
+        ))
+    } else {
+        ArmError::io(path.display().to_string(), error)
+    }
 }
 
 pub(crate) fn file_state_digest(state: &FileState) -> Result<String, ArmError> {
@@ -1315,6 +1352,44 @@ mod tests {
         assert_eq!(
             library_root_for(home, Some(PathBuf::from("/custom/rules"))),
             PathBuf::from("/custom/rules")
+        );
+    }
+
+    #[test]
+    fn home_dir_prefers_home_then_userprofile() {
+        assert_eq!(
+            resolve_home_dir(
+                Some(OsString::from("/Users/demo")),
+                Some(OsString::from("C:\\Users\\demo"))
+            )
+            .expect("home"),
+            PathBuf::from("/Users/demo")
+        );
+        assert_eq!(
+            resolve_home_dir(None, Some(OsString::from("C:\\Users\\demo"))).expect("profile"),
+            PathBuf::from("C:\\Users\\demo")
+        );
+        assert!(resolve_home_dir(Some(OsString::new()), None).is_err());
+    }
+
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_state_root_uses_application_support() {
+        assert_eq!(
+            platform_state_root(Path::new("/Users/demo")),
+            PathBuf::from("/Users/demo/Library/Application Support/agent-rules-manager")
+        );
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn windows_state_root_defaults_under_roaming_appdata() {
+        let home = Path::new(r"C:\Users\demo");
+        let root = platform_state_root(home);
+        assert!(
+            root.ends_with("agent-rules-manager"),
+            "unexpected state root {}",
+            root.display()
         );
     }
 

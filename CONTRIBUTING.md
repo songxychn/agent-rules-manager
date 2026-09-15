@@ -2,7 +2,7 @@
 
 Thanks for helping improve Agent Rules Manager.
 
-This is an early `0.x` source release for developers. See the [README](README.md#开发者试用) for browser-demo and desktop setup. The browser demo uses in-memory data and is the preferred starting point for UI work.
+This is an early `0.x` source release. See the [README](README.md#安装) for desktop installers, the browser demo, and desktop setup. The browser demo uses in-memory data and is the preferred starting point for UI work.
 
 ## Development
 

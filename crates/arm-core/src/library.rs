@@ -2658,12 +2658,24 @@ fn write_atomic_symlink(path: &Path, target: &Path) -> Result<(), ArmError> {
         .map_err(|error| ArmError::io(parent.display().to_string(), error))?;
     let temporary = parent.join(format!(".current.arm-{}", std::process::id()));
     std::os::windows::fs::symlink_dir(target, &temporary)
-        .map_err(|error| ArmError::io(temporary.display().to_string(), error))?;
+        .map_err(|error| windows_symlink_error(&temporary, error))?;
     if let Err(error) = fs::rename(&temporary, path) {
         let _ = fs::remove_dir(&temporary);
         return Err(ArmError::io(path.display().to_string(), error));
     }
     Ok(())
+}
+
+#[cfg(windows)]
+fn windows_symlink_error(path: &Path, error: std::io::Error) -> ArmError {
+    if error.raw_os_error() == Some(1314) {
+        ArmError::Blocked(format!(
+            "Windows requires Developer Mode or administrator rights to create a symbolic link at {}",
+            path.display()
+        ))
+    } else {
+        ArmError::io(path.display().to_string(), error)
+    }
 }
 
 fn file_state_digest(state: &FileState) -> Result<String, ArmError> {
