@@ -1,54 +1,54 @@
-# Desktop releases
+# 桌面发布
 
-Push a version tag to build installers and attach them to a GitHub Release:
+推送版本 tag 会构建安装包并挂到 GitHub Release：
 
 ```bash
 git tag v0.1.0
 git push origin v0.1.0
 ```
 
-The [Release](../.github/workflows/release.yml) workflow produces:
+[Release](../.github/workflows/release.yml) 工作流会产出：
 
-| Platform | Artifact |
+| 平台 | 产物 |
 | --- | --- |
-| macOS Apple Silicon | `.dmg` plus updater `.app.tar.gz` |
-| macOS Intel | `.dmg` plus updater `.app.tar.gz` |
-| Windows | current-user NSIS `.exe` |
-| Linux | `.deb`, `.AppImage`, and updater signature |
+| macOS Apple Silicon | `.dmg` 以及更新器用的 `.app.tar.gz` |
+| macOS Intel | `.dmg` 以及更新器用的 `.app.tar.gz` |
+| Windows | 当前用户 NSIS `.exe` |
+| Linux | `.deb`、`.AppImage` 以及更新器签名 |
 
-It also uploads `latest.json` so installed apps can check GitHub Releases and install the update from Settings.
+同时会上传 `latest.json`，已安装的应用即可在 GitHub Releases 检查更新，并从设置里安装。
 
-`workflow_dispatch` rebuilds the same artifacts against the current version string as a draft.
+`workflow_dispatch` 会按当前版本号重建同样产物，并保存为草稿 Release。
 
-## Updater signing
+## 更新器签名
 
-In-app updates require a minisign key pair. The public key is in `src-tauri/tauri.conf.json`. The private key lives in gitignored `.tauri/updater.key` on the machine that generated it.
+应用内更新需要一对 minisign 密钥。公钥写在 `src-tauri/tauri.conf.json`。私钥放在生成它的那台机器上、已被 gitignore 的 `.tauri/updater.key`。
 
-Set these repository secrets before the first tagged release:
+首次打 tag 发布前，请配置这些仓库 secret：
 
-- `TAURI_SIGNING_PRIVATE_KEY` — contents of `.tauri/updater.key`
-- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — empty unless you created the key with a password
+- `TAURI_SIGNING_PRIVATE_KEY` — `.tauri/updater.key` 的内容
+- `TAURI_SIGNING_PRIVATE_KEY_PASSWORD` — 若生成密钥时未设密码则留空
 
 ```bash
 gh secret set TAURI_SIGNING_PRIVATE_KEY < .tauri/updater.key
 ```
 
-If this key is lost, already-installed apps cannot verify future updates until users install a new build that embeds a replacement public key.
+密钥丢失后，已安装的应用无法校验后续更新，除非用户改装嵌入了新公钥的构建。
 
-The updater endpoint is `https://github.com/songxychn/agent-rules-manager/releases/latest/download/latest.json`. GitHub only serves that URL for a public, non-prerelease latest release.
+更新器地址是 `https://github.com/songxychn/agent-rules-manager/releases/latest/download/latest.json`。GitHub 只为公开仓库上的非预发布最新 Release 提供该 URL。
 
-Local packages that create updater artifacts also need the private key in the environment:
+本地打包若生成更新器产物，也需要在环境中提供私钥：
 
 ```bash
 export TAURI_SIGNING_PRIVATE_KEY_PATH="$PWD/.tauri/updater.key"
 bun run tauri:build
 ```
 
-## Apple and Windows OS signing
+## Apple 与 Windows 系统签名
 
-Unsigned packages still install. Ordinary macOS users will see a Gatekeeper warning until Apple Developer ID signing and notarization are configured. Ordinary Windows users may see SmartScreen until Authenticode signing is added.
+未签名的安装包仍可安装。在配置 Apple Developer ID 签名和公证之前，普通 macOS 用户会看到 Gatekeeper 警告。在加入 Authenticode 之前，普通 Windows 用户可能看到 SmartScreen。
 
-Optional repository secrets for macOS notarization:
+macOS 公证可选的仓库 secret：
 
 - `APPLE_CERTIFICATE`
 - `APPLE_CERTIFICATE_PASSWORD`
@@ -57,4 +57,4 @@ Optional repository secrets for macOS notarization:
 - `APPLE_PASSWORD`
 - `APPLE_TEAM_ID`
 
-See [Tauri macOS signing](https://v2.tauri.app/distribute/sign-macos/).
+说明见 [Tauri macOS 签名](https://v2.tauri.app/distribute/sign-macos/)。

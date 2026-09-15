@@ -21,7 +21,7 @@ Agent Rules Manager 是一个 local-first 的桌面应用与 CLI：用多个 **P
 - **Windows**：接入 Agent 规则仍需要 [开发人员模式](https://learn.microsoft.com/windows/apps/get-started/enable-your-device-for-development)（或管理员权限）才能创建符号链接。
 - **Linux**：`.deb` 适合 Debian/Ubuntu；其他发行版可用 AppImage。
 
-试用问题可提交到 [Issues](https://github.com/songxychn/agent-rules-manager/issues)，附操作系统、版本、复现步骤和脱敏后的计划输出；敏感问题按 [安全策略](SECURITY.md) 私下报告。维护者如何打 tag 打包见 [发布说明](docs/RELEASE.md)。
+试用问题请用 [Issue 模板](https://github.com/songxychn/agent-rules-manager/issues/new/choose) 提交，写明操作系统、版本、复现步骤和脱敏后的计划输出；敏感问题按 [安全策略](SECURITY.md) 私下报告。公开变更见 [更新日志](CHANGELOG.md)。维护者如何打 tag 打包见 [发布说明](docs/RELEASE.md)。
 
 ## 浏览器演示
 
@@ -83,7 +83,7 @@ profiles/work/AGENTS.md ── generate ── .runtime/work-<digest>/
 └── current -> .runtime/work-8d9f20b751a4/  # 本机选择，不同步
 ```
 
-规则正文只属于 Profile；渲染结果属于 Runtime；`current` 只表达这台机器当前选择。格式细节见 [Rule Library](docs/RULE_LIBRARY.md)。
+规则正文只属于 Profile；渲染结果属于 Runtime；`current` 只表达这台机器当前选择。格式细节见 [规则库格式](docs/RULE_LIBRARY.md)。
 
 ## Profile 示例
 
@@ -253,6 +253,8 @@ cargo run -p arm-cli -- --project /absolute/project apply --agents cursor --disc
 bun install --frozen-lockfile
 bun run test
 bun run build
+cargo fmt --all
+cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace
 bun run tauri dev
 # 本地生成当前平台安装包
@@ -271,8 +273,8 @@ src/               React 控制台与惰性浏览器演示
 docs/              数据格式、架构契约与发布流程
 ```
 
-实现约束见 [架构说明](docs/ARCHITECTURE.md)，参与方式见 [CONTRIBUTING.md](CONTRIBUTING.md)。
+实现约束见 [架构说明](docs/ARCHITECTURE.md)，参与方式见 [贡献指南](CONTRIBUTING.md)，公开变更见 [更新日志](CHANGELOG.md)。
 
-## License
+## 许可证
 
 [MIT](LICENSE)

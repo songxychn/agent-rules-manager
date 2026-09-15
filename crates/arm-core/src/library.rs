@@ -1399,7 +1399,7 @@ fn rollback_library_backup(
     state_root: &Path,
     backup_path: &Path,
 ) -> Result<RollbackOutcome, ArmError> {
-    let data = fs::read_to_string(&backup_path)
+    let data = fs::read_to_string(backup_path)
         .map_err(|error| ArmError::io(backup_path.display().to_string(), error))?;
     let backup: BackupSnapshot = serde_json::from_str(&data)?;
     for entry in &backup.entries {
@@ -1418,7 +1418,7 @@ fn rollback_library_backup(
         restored.push(entry.target_path.clone());
     }
     cleanup_created_directories(&backup.created_directories)?;
-    archive_backup(state_root, &backup_path)?;
+    archive_backup(state_root, backup_path)?;
     Ok(RollbackOutcome {
         restored,
         backup_id: backup.id,
@@ -2444,8 +2444,7 @@ fn apply_changes(
         created_directories: created_directories.clone(),
     };
     let backup_path = write_backup(state_root, &backup)?;
-    let mut completed = 0;
-    for change in &changes {
+    for (completed, change) in changes.iter().enumerate() {
         let current = match read_file_state(&change.path) {
             Ok(current) => current,
             Err(error) => {
@@ -2482,7 +2481,6 @@ fn apply_changes(
             }
             return Err(ArmError::ApplyDrift(change.path.display().to_string()));
         }
-        completed += 1;
     }
     Ok(LibraryMutationOutcome {
         changed: changes
