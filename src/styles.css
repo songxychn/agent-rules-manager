@@ -982,7 +982,6 @@ code {
 .settings-page {
   display: grid;
   min-width: 0;
-  max-width: 720px;
   align-content: start;
   gap: 16px;
 }
