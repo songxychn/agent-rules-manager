@@ -6,7 +6,7 @@
 
 ## [未发布]
 
-仓库版本号已是 `0.1.0`，下列条目描述首个公开版本打算交付的能力。打 `v0.1.0` tag 后，本节会改成带日期的正式版本标题。
+## [0.1.0] - 2026-09-16
 
 ### 新增
 
@@ -37,4 +37,5 @@
 - 不管理 Skills、MCP、子代理、凭据或模型登录状态。
 - 所有已接入项目跟随本机当前 Profile，不支持每个项目独立选用 Profile。
 
-[未发布]: https://github.com/songxychn/agent-rules-manager/compare/master...HEAD
+[未发布]: https://github.com/songxychn/agent-rules-manager/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/songxychn/agent-rules-manager/releases/tag/v0.1.0
