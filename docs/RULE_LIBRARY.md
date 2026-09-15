@@ -1,10 +1,10 @@
-# Rule Library format
+# 规则库格式
 
-The active format is intentionally small, JSON-based, and independent of any Agent CLI.
+现行格式刻意保持精简，基于 JSON，不依赖任何 Agent CLI。
 
-## Root schema
+## 根 schema
 
-`schema.json` identifies single-file Profile schema v3 and its transport boundary:
+`schema.json` 标识单文件 Profile schema v3 及其传输边界：
 
 ```json
 {
@@ -25,13 +25,13 @@ The active format is intentionally small, JSON-based, and independent of any Age
 }
 ```
 
-The `sync` object declares policy for humans and a future transport. It does not grant permission to scan or mutate arbitrary matching paths.
+`sync` 对象向人和未来传输层声明策略。它并不授权扫描或改写任意匹配路径。
 
-A library created from the former root `AGENTS.md` also records `"legacySource": "AGENTS.md"`. This provenance is used only to recognize native Agent links that still point at the removed path. No other value is accepted, and the root file does not remain a source.
+由旧根文件 `AGENTS.md` 创建的规则库还会记录 `"legacySource": "AGENTS.md"`。这条来源信息只用于识别仍指向已删除路径的 Agent 原生链接。不接受其他取值，根文件也不再作为源。
 
 ## Profile
 
-Directory name and `id` must match:
+目录名必须与 `id` 一致：
 
 ```text
 profiles/work/
@@ -48,23 +48,23 @@ profiles/work/
 }
 ```
 
-Rules:
+规则：
 
-- `id`: 1–64 characters; begins with a lowercase ASCII letter or digit; remaining characters may also use `_` and `-`;
-- `name`: non-empty, at most 80 characters;
-- `description`: optional, at most 240 characters;
-- the only rule source is `AGENTS.md`, a regular UTF-8 file; symlinks are rejected;
-- v3 metadata has no configurable source list. Supplemental sources are not supported.
+- `id`：1–64 个字符；以小写 ASCII 字母或数字开头；其余字符还可使用 `_` 和 `-`；
+- `name`：非空，最多 80 个字符；
+- `description`：可选，最多 240 个字符；
+- 唯一规则源是普通 UTF-8 文件 `AGENTS.md`；符号链接会被拒绝；
+- v3 元数据没有可配置的源文件列表，不支持补充源。
 
-Creating a Profile writes `profile.json` and `AGENTS.md` together in a previewed transaction. Existing paths are never overwritten. Edit all rules in that AGENTS.md; no add-file or remove-file command is exposed.
+创建 Profile 会在带预览的事务中同时写入 `profile.json` 和 `AGENTS.md`。已有路径绝不覆盖。所有规则都在该 AGENTS.md 中编辑；不提供增删文件命令。
 
-Deleting an inactive Profile snapshots its metadata and AGENTS.md, then removes its directory. Any undeclared file, directory, or symlink blocks deletion. Rollback restores the original files unless a target has since drifted.
+删除未启用的 Profile 会先快照其元数据和 AGENTS.md，再删除目录。任何未声明的文件、目录或符号链接都会阻止删除。除非目标之后已漂移，回滚会恢复原文件。
 
-Profile documents contain no active flag. The same synced Profile can be active on one machine and inactive on another without changing source files.
+Profile 文档不含启用标记。同一套已同步 Profile 可以在一台机器上启用、在另一台机器上停用，而不改源文件。
 
-## Machine selection
+## 本机选择
 
-The application-state directory, not the rule library, contains:
+应用状态目录（不是规则库）包含：
 
 ```json
 {
@@ -73,24 +73,24 @@ The application-state directory, not the rule library, contains:
 }
 ```
 
-The matching library entry is a local relative symlink:
+规则库里对应的是本机相对符号链接：
 
 ```text
 current -> .runtime/work-8d9f20b751a4
 ```
 
-| Machine | Available Profiles | Local `activeProfileId` |
+| 机器 | 可用 Profile | 本机 `activeProfileId` |
 | --- | --- | --- |
-| company-mac | `default`, `work`, `personal` | `work` |
-| home-mac | `default`, `work`, `personal` | `personal` |
+| company-mac | `default`、`work`、`personal` | `work` |
+| home-mac | `default`、`work`、`personal` | `personal` |
 
-Neither selection modifies a Profile manifest.
+选择不会改写 Profile 清单。
 
-All global and project Agent links on that machine follow this same selection. Project connections do not select separate Profiles and are not portable exports for other machines.
+该机器上所有全局和项目 Agent 链接都跟随这一选择。项目接入不会单独选择 Profile，也不是给其他机器用的可移植导出。
 
-## Runtime manifest
+## Runtime 清单
 
-Runtime output is generated and must not be hand-edited:
+Runtime 输出由程序生成，不要手工编辑：
 
 ```json
 {
@@ -107,25 +107,25 @@ Runtime output is generated and must not be hand-edited:
 }
 ```
 
-The Profile digest includes logical source paths and exact contents. Changing AGENTS.md content selects another Runtime directory; `current` changes only through a verified transaction.
+Profile 摘要包含逻辑源路径和精确内容。改 AGENTS.md 内容会选用另一个 Runtime 目录；`current` 只通过已校验的事务变更。
 
-Editing the source marks the selected Runtime stale; it does not automatically regenerate it. Preview and activate the same Profile again to refresh connected Agents. Reading status or refreshing the UI never applies source changes.
+编辑源文件会使当前 Runtime 变为过期，但不会自动重新生成。再次预览并启用同一 Profile，才会刷新已接入的 Agent。读取状态或刷新界面不会应用源变更。
 
-## Schema v1 / v2 import
+## Schema v1 / v2 导入
 
-Both legacy formats require a previewed upgrade to v3. V1 used `packs/**` and `profiles/<id>.json`; v2 stored an ordered `instructions` list in each Profile manifest.
+两种旧格式都需要带预览的升级到 v3。v1 使用 `packs/**` 和 `profiles/<id>.json`；v2 在每个 Profile 清单里保存有序的 `instructions` 列表。
 
-Migration concatenates each Profile's source contents in the original order into its AGENTS.md, adding only separating newlines. A single source is preserved byte for byte. Original files and metadata are snapshotted before writes; supplemental files are removed only after their merged content is prepared. V2 supplemental directories are removed once empty, except ancestors of undeclared empty directories. Undeclared empty directory trees are preserved and do not block v2 migration. Undeclared files, symlinks, and unused v1 Packs still block migration.
+迁移按原顺序把每个 Profile 的源内容拼进其 AGENTS.md，只补充分隔换行。单一源会逐字节保留。写入前先快照原文件和元数据；补充文件只在合并内容准备好后移除。v2 的补充目录在变空后删除，但未声明空目录的祖先除外。未声明的空目录树会保留，不阻止 v2 迁移。未声明文件、符号链接和未使用的 v1 Pack 仍会阻止迁移。
 
-The local active Profile is preserved and regenerated. A library without a local selection remains unselected. Source migration and runtime activation use separate existing snapshots; restore activation first, then migration. Rollback refuses to overwrite post-apply drift.
+本机当前 Profile 会保留并重新生成。没有本机选择的规则库保持未选择。源迁移与 Runtime 启用使用各自已有的快照；先恢复启用，再恢复迁移。回滚拒绝覆盖应用后的漂移。
 
-## Git baseline
+## Git 基线
 
-For a dedicated rule-library repository, a minimal `.gitignore` is:
+若规则库单独成仓，最小 `.gitignore` 为：
 
 ```gitignore
 .runtime/
 current
 ```
 
-Application state and backups live outside the repository. Credentials, chat history, provider tokens, and Agent login state must never be added to the Profile library.
+应用状态和备份放在仓库外。凭据、聊天记录、Provider 令牌和 Agent 登录状态绝不能加入 Profile 库。
