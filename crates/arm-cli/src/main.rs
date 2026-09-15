@@ -1,10 +1,9 @@
 use arm_core::{
-    default_library_root, default_state_root, ArmError, ConnectionChange, LibraryMutationOutcome,
-    LibraryPlan, RulesManager,
+    default_home_dir, default_library_root, default_state_root, ArmError, ConnectionChange,
+    LibraryMutationOutcome, LibraryPlan, RulesManager,
 };
 use clap::{Parser, Subcommand};
 use serde::Serialize;
-use std::env;
 use std::path::PathBuf;
 
 #[derive(Debug, Parser)]
@@ -133,9 +132,7 @@ fn run() -> Result<(), ArmError> {
     let cli = Cli::parse();
     let root = cli.root.map(Ok).unwrap_or_else(default_library_root)?;
     let state_root = cli.state_root.map(Ok).unwrap_or_else(default_state_root)?;
-    let home = env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| ArmError::MissingSource("HOME is not set".into()))?;
+    let home = default_home_dir()?;
     let manager = RulesManager::new(root, state_root, &home);
     let manager = match cli.project {
         Some(project) => manager.for_project(&home, &project)?,

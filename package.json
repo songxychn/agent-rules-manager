@@ -9,10 +9,13 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",
-    "tauri": "bun tools/tauri.ts"
+    "tauri": "bun tools/tauri.ts",
+    "tauri:build": "bun tools/tauri.ts build"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.8.0",
+    "@tauri-apps/plugin-process": "^2.3.1",
+    "@tauri-apps/plugin-updater": "^2.11.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

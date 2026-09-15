@@ -1,8 +1,7 @@
 use arm_core::{
-    default_library_root, ApplyOutcome, ConnectionChange, LibraryMutationOutcome, LibraryPlan,
-    ProjectionPlan, RollbackOutcome, RulesManager, WorkspaceSnapshot,
+    default_home_dir, default_library_root, ApplyOutcome, ConnectionChange, LibraryMutationOutcome,
+    LibraryPlan, ProjectionPlan, RollbackOutcome, RulesManager, WorkspaceSnapshot,
 };
-use std::env;
 use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 
@@ -17,9 +16,7 @@ fn build_manager(app: &AppHandle, library_root: Option<String>) -> Result<RulesM
         .path()
         .app_data_dir()
         .map_err(|error| error.to_string())?;
-    let home = env::var_os("HOME")
-        .map(PathBuf::from)
-        .ok_or_else(|| "HOME is not set".to_string())?;
+    let home = default_home_dir().map_err(|error| error.to_string())?;
     Ok(RulesManager::new(root, state_root, &home))
 }
 
@@ -31,9 +28,7 @@ fn build_projection_manager(
     let manager = build_manager(app, library_root)?;
     match project_root.filter(|path| !path.trim().is_empty()) {
         Some(project) => {
-            let home = env::var_os("HOME")
-                .map(PathBuf::from)
-                .ok_or("HOME is not set")?;
+            let home = default_home_dir().map_err(|error| error.to_string())?;
             manager
                 .for_project(&home, &PathBuf::from(project))
                 .map_err(|e| e.to_string())
@@ -241,6 +236,8 @@ fn restore_history(
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_process::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             get_workspace_snapshot,
             get_operation_history,

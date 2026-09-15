@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  bundle:
+    name: ${{ matrix.name }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS Apple Silicon
+            platform: macos-15
+            args: --target aarch64-apple-darwin --bundles dmg
+            rust-target: aarch64-apple-darwin
+          - name: macOS Intel
+            platform: macos-15
+            args: --target x86_64-apple-darwin --bundles dmg
+            rust-target: x86_64-apple-darwin
+          - name: Linux
+            platform: ubuntu-22.04
+            args: --bundles deb,appimage
+            rust-target: ""
+          - name: Windows
+            platform: windows-latest
+            args: --bundles nsis
+            rust-target: ""
+
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version-file: .bun-version
+
+      - name: Select repository Rust toolchain
+        run: rustup show
+
+      - name: Add cross-compile target
+        if: matrix.rust-target != ''
+        run: rustup target add ${{ matrix.rust-target }}
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+        with:
+          shared-key: release-${{ matrix.platform }}
+          save-if: ${{ github.event_name == 'push' }}
+
+      - name: Install Linux WebKit dependencies
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf xdg-utils
+
+      - name: Install frontend dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Build installers
+        uses: tauri-apps/tauri-action@a6e90ddc4ba4721f294e52b856d3d50e645edc07 # v0 / action-v1.0.0 + retry fix
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseName: Agent Rules Manager ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
+          releaseBody: |
+            Desktop installers for ordinary use. The app can check this release for updates and install them in Settings.
+
+            macOS builds are notarized only when Apple signing secrets are configured. Unsigned downloads may need a right-click → Open on first launch.
+            Windows agent connections still require Developer Mode (or administrator rights) to create symbolic links.
+          releaseDraft: ${{ github.ref_type != 'tag' }}
+          prerelease: false
+          uploadUpdaterJson: true
+          args: ${{ matrix.args }}

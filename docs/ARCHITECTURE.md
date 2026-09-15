@@ -126,6 +126,10 @@ profiles/**
 
 It must exclude `.runtime/**`, `current`, all application state, native Agent paths, backups, credentials, and provider authentication. Conflicts remain visible; system Git/SSH or another transport owns authentication.
 
+## Desktop distribution
+
+Version tags build unsigned installers: macOS DMG (Apple Silicon and Intel), Windows current-user NSIS, and Linux `.deb` / AppImage. Installed desktop apps check `latest.json` on GitHub Releases and can download a signed updater bundle from Settings. Apple notarization and Authenticode remain optional OS-trust steps; they are not part of the filesystem safety contract.
+
 ## Extension points
 
 - explicit Git fetch/pull/merge/push;
@@ -133,5 +137,5 @@ It must exclude `.runtime/**`, `current`, all application state, native Agent pa
 - configurable agent detection and target paths;
 - controlled import or archive for independent native rules;
 - typed resources beyond instruction Markdown;
-- Windows-specific junction or copy guarantees;
-- signed desktop releases and updater metadata.
+- Windows-specific junction or copy guarantees so agent links work without Developer Mode;
+- signed, notarized desktop releases.

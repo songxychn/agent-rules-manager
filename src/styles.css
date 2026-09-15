@@ -989,6 +989,13 @@ code {
   gap: 16px;
 }
 
+.settings-main-column {
+  display: grid;
+  min-width: 0;
+  align-content: start;
+  gap: 16px;
+}
+
 .settings-masthead {
   grid-column: 1 / -1;
   padding: 6px 2px 2px;
@@ -1108,6 +1115,56 @@ code {
 .language-output strong {
   color: var(--mint-dark);
   font-size: var(--text-caption);
+}
+
+.update-body {
+  display: grid;
+  gap: 12px;
+  padding: 18px 20px 20px;
+}
+
+.update-body p {
+  margin: 0;
+  color: var(--ink-muted);
+  font-size: var(--text-caption);
+  line-height: 1.55;
+}
+
+.update-body .button {
+  justify-self: start;
+}
+
+.update-notes {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+}
+
+.update-notes summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-size: var(--text-meta);
+  font-weight: 650;
+}
+
+.update-notes p {
+  margin: 0;
+  padding: 0 12px 12px;
+  white-space: pre-wrap;
+}
+
+.update-progress {
+  overflow: hidden;
+  height: 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-soft);
+}
+
+.update-progress span {
+  display: block;
+  height: 100%;
+  background: var(--mint-dark);
 }
 
 .settings-boundary-note {

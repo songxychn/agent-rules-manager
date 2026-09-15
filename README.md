@@ -4,9 +4,28 @@ Agent Rules Manager 是一个 local-first 的桌面应用与 CLI：用多个 **P
 
 规则正文仍由用户在 VS Code、Cursor、Typora 等工具中维护；本项目负责结构校验、规则生成、本机切换、Agent 检测、原生路径接入、变更预览以及带漂移保护的回滚。
 
-## 开发者试用
+## 安装
 
-当前是 `0.x` 早期版本，以源码方式提供试用，尚未提供桌面安装包、签名发行或自动更新。可先用浏览器演示了解流程，只需 Bun 1.4 或更高版本：
+从 [GitHub Releases](https://github.com/songxychn/agent-rules-manager/releases/latest) 下载当前版本的桌面安装包：
+
+| 系统 | 安装包 |
+| --- | --- |
+| macOS Apple Silicon | `.dmg` |
+| macOS Intel | `.dmg` |
+| Windows | 当前用户 NSIS `.exe` |
+| Linux | `.deb` 或 `.AppImage` |
+
+这是 `0.x` 预发布。安装包方便直接打开图形界面。桌面端可在设置里检查更新并一键安装，不必再去 Releases 手动下载。Apple 公证和 Windows Authenticode 尚未配置。
+
+- **macOS**：未公证的应用第一次打开时，按住 Control 点击图标，选择「打开」。
+- **Windows**：接入 Agent 规则仍需要 [开发人员模式](https://learn.microsoft.com/windows/apps/get-started/enable-your-device-for-development)（或管理员权限）才能创建符号链接。
+- **Linux**：`.deb` 适合 Debian/Ubuntu；其他发行版可用 AppImage。
+
+试用问题可提交到 [Issues](https://github.com/songxychn/agent-rules-manager/issues)，附操作系统、版本、复现步骤和脱敏后的计划输出；敏感问题按 [安全策略](SECURITY.md) 私下报告。维护者如何打 tag 打包见 [发布说明](docs/RELEASE.md)。
+
+## 浏览器演示
+
+不安装桌面端也可以先看流程。需要 Bun 1.4 或更高版本：
 
 ```bash
 git clone https://github.com/songxychn/agent-rules-manager.git
@@ -17,7 +36,7 @@ bun run dev
 
 打开 <http://127.0.0.1:1420>。浏览器模式使用纯内存演示数据，操作不会读取或修改真实规则库、Agent 配置，也不会启动本地编辑器；刷新页面会重置演示数据。按 `Ctrl+C` 停止服务。
 
-要操作本机配置，请按下文的 [桌面开发](#桌面开发) 或 [CLI](#cli) 从源码运行。桌面端目前以 macOS 为主要开发环境；Linux、Windows 的完整安装、文件接入和回滚流程尚未建立发布验证矩阵，不承诺所有平台和 Agent 版本均已验证。试用问题可提交到 [Issues](https://github.com/songxychn/agent-rules-manager/issues)，附操作系统、版本、复现步骤和脱敏后的计划输出；敏感问题按 [安全策略](SECURITY.md) 私下报告。
+要改本机配置，请用上面的安装包，或按 [桌面开发](#桌面开发) / [CLI](#cli) 从源码运行。桌面端目前以 macOS 为主要验证环境；Linux 与 Windows 安装包会随 Release 构建，但完整文件接入和回滚流程尚未建立发布验证矩阵，不承诺所有平台和 Agent 版本均已验证。
 
 ## 核心模型
 
@@ -236,6 +255,8 @@ bun run test
 bun run build
 cargo test --workspace
 bun run tauri dev
+# 本地生成当前平台安装包
+bun run tauri:build
 ```
 
 桌面端只允许用固定打开目标处理后端重新校验过的 Profile 文件；WebView 不能提交任意可执行文件或绝对路径。普通 `bun run dev` 使用纯内存演示数据，不读取或修改真实用户目录，也不会启动本地应用。
@@ -247,7 +268,7 @@ crates/arm-core/   Profile 校验、渲染、事务投射与回滚
 crates/arm-cli/    CLI
 src-tauri/         Tauri 命令与安全的外部打开边界
 src/               React 控制台与惰性浏览器演示
-docs/              数据格式与架构契约
+docs/              数据格式、架构契约与发布流程
 ```
 
 实现约束见 [架构说明](docs/ARCHITECTURE.md)，参与方式见 [CONTRIBUTING.md](CONTRIBUTING.md)。

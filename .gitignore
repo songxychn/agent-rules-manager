@@ -20,3 +20,6 @@ src-tauri/gen/
 !.env.example
 !.env.sample
 !.env.template
+
+# Updater private key; never commit
+.tauri/
