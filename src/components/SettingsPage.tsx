@@ -26,26 +26,13 @@ function errorMessage(error: unknown): string {
 }
 
 export function SettingsPage() {
-  const { locale, preference, setPreference, systemLocale, t } = useI18n();
+  const { preference, setPreference, systemLocale, t } = useI18n();
   const [updateView, setUpdateView] = useState<UpdateView>({ phase: "loading" });
 
-  const optionCopy = (value: LanguagePreference) => {
-    if (value === "system") {
-      return {
-        title: t("settings.language.system"),
-        description: t("settings.language.systemDescription"),
-      };
-    }
-    if (value === "zh-CN") {
-      return {
-        title: t("settings.language.zh"),
-        description: t("settings.language.zhDescription"),
-      };
-    }
-    return {
-      title: t("settings.language.en"),
-      description: t("settings.language.enDescription"),
-    };
+  const languageTitle = (value: LanguagePreference) => {
+    if (value === "system") return t("settings.language.system");
+    if (value === "zh-CN") return t("settings.language.zh");
+    return t("settings.language.en");
   };
 
   const refreshUpdate = useCallback(async () => {
@@ -107,12 +94,44 @@ export function SettingsPage() {
     }
   };
 
-  const versionLabel = (version: string) => (
-    <div className="language-output" aria-live="polite">
-      <span>{t("settings.update.current")}</span>
-      <strong>{version}</strong>
-    </div>
-  );
+  const version =
+    updateView.phase === "available" || updateView.phase === "downloading"
+      ? updateView.check.currentVersion
+      : updateView.phase === "loading"
+        ? undefined
+        : updateView.version;
+
+  let updateStatus = t("settings.update.checking");
+  let updateAction: { label: string; onClick: () => void; primary?: boolean } | undefined;
+  if (updateView.phase === "unavailable") {
+    updateStatus = t("settings.update.unavailable");
+  } else if (updateView.phase === "upToDate") {
+    updateStatus = t("settings.update.upToDate");
+    updateAction = { label: t("settings.update.check"), onClick: () => void refreshUpdate() };
+  } else if (updateView.phase === "available") {
+    updateStatus = t("settings.update.available", { version: updateView.check.version });
+    updateAction = {
+      label: t("settings.update.install"),
+      onClick: () => void installUpdate(updateView.check),
+      primary: true,
+    };
+  } else if (updateView.phase === "downloading") {
+    updateStatus =
+      updateView.percent === undefined
+        ? t("settings.update.downloadingUnknown")
+        : t("settings.update.downloading", { percent: updateView.percent });
+  } else if (updateView.phase === "installing") {
+    updateStatus = t("settings.update.installing");
+  } else if (updateView.phase === "error") {
+    updateStatus = t(updateView.install ? "settings.update.installError" : "settings.update.error", {
+      message: updateView.message,
+    });
+    updateAction = {
+      label: t("settings.update.check"),
+      onClick: () => void refreshUpdate(),
+      primary: true,
+    };
+  }
 
   return (
     <section className="settings-page" aria-labelledby="settings-heading">
@@ -122,39 +141,11 @@ export function SettingsPage() {
         <p>{t("settings.intro")}</p>
       </header>
 
-      <div className="settings-main-column">
-        <div className="settings-routing-panel">
-          <div className="settings-section-heading">
-            <div>
-              <p className="eyebrow">{t("settings.language.eyebrow")}</p>
-              <h2>{t("settings.language.title")}</h2>
-            </div>
-            <p>{t("settings.language.description")}</p>
-          </div>
-
-          <div className="language-setting">
-            <div className="language-field-copy">
-              <label htmlFor="interface-language">{t("settings.language.group")}</label>
-              <small>{optionCopy(preference).description}</small>
-            </div>
-            <div className="language-select-wrap">
-              <select
-                id="interface-language"
-                value={preference}
-                onChange={(event) => setPreference(event.target.value as LanguagePreference)}
-              >
-                {options.map((option) => (
-                  <option value={option} key={option}>
-                    {optionCopy(option).title}
-                  </option>
-                ))}
-              </select>
-            </div>
-          </div>
-
-          <div className="language-output" aria-live="polite">
-            <span>{t("settings.language.output")}</span>
-            <strong>{locale === "zh-CN" ? t("language.zh") : t("language.en")}</strong>
+      <div className="settings-panel">
+        <div className="settings-row">
+          <div className="settings-row-copy">
+            <label htmlFor="interface-language">{t("settings.language.title")}</label>
+            <p id="language-note">{t("settings.safety.body")}</p>
             {preference === "system" && (
               <small>
                 {t("settings.language.systemDetected", {
@@ -163,130 +154,58 @@ export function SettingsPage() {
               </small>
             )}
           </div>
+          <div className="language-select-wrap">
+            <select
+              id="interface-language"
+              value={preference}
+              aria-describedby="language-note"
+              onChange={(event) => setPreference(event.target.value as LanguagePreference)}
+            >
+              {options.map((option) => (
+                <option value={option} key={option}>
+                  {languageTitle(option)}
+                </option>
+              ))}
+            </select>
+          </div>
         </div>
 
-        <div className="settings-routing-panel">
-          <div className="settings-section-heading">
-            <div>
-              <p className="eyebrow">{t("settings.update.eyebrow")}</p>
-              <h2>{t("settings.update.title")}</h2>
-            </div>
-            <p>{t("settings.update.description")}</p>
+        <div className="settings-row">
+          <div className="settings-row-copy">
+            <strong>{t("settings.update.title")}</strong>
+            <p aria-live="polite">{updateStatus}</p>
+            {updateView.phase === "available" && updateView.check.notes && (
+              <details className="update-notes">
+                <summary>{t("settings.update.notes")}</summary>
+                <p>{updateView.check.notes}</p>
+              </details>
+            )}
+            {updateView.phase === "downloading" && (
+              <div
+                className="update-progress"
+                role="progressbar"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={updateView.percent}
+              >
+                <span style={{ width: `${updateView.percent ?? 15}%` }} />
+              </div>
+            )}
           </div>
-
-          {updateView.phase === "loading" && (
-            <div className="update-body">
-              <p>{t("settings.update.checking")}</p>
-            </div>
-          )}
-
-          {updateView.phase === "unavailable" && (
-            <>
-              {versionLabel(updateView.version)}
-              <div className="update-body">
-                <p>{t("settings.update.unavailable")}</p>
-              </div>
-            </>
-          )}
-
-          {updateView.phase === "checking" && (
-            <>
-              {versionLabel(updateView.version)}
-              <div className="update-body">
-                <p>{t("settings.update.checking")}</p>
-              </div>
-            </>
-          )}
-
-          {updateView.phase === "upToDate" && (
-            <>
-              {versionLabel(updateView.version)}
-              <div className="update-body">
-                <p>{t("settings.update.upToDate")}</p>
-                <button className="button button-ghost" type="button" onClick={() => void refreshUpdate()}>
-                  {t("settings.update.check")}
-                </button>
-              </div>
-            </>
-          )}
-
-          {updateView.phase === "available" && (
-            <>
-              {versionLabel(updateView.check.currentVersion)}
-              <div className="update-body">
-                <p>{t("settings.update.available", { version: updateView.check.version })}</p>
-                {updateView.check.notes && (
-                  <details className="update-notes">
-                    <summary>{t("settings.update.notes")}</summary>
-                    <p>{updateView.check.notes}</p>
-                  </details>
-                )}
-                <button
-                  className="button button-primary"
-                  type="button"
-                  onClick={() => void installUpdate(updateView.check)}
-                >
-                  {t("settings.update.install")}
-                </button>
-              </div>
-            </>
-          )}
-
-          {updateView.phase === "downloading" && (
-            <>
-              {versionLabel(updateView.check.currentVersion)}
-              <div className="update-body">
-                <p>
-                  {updateView.percent === undefined
-                    ? t("settings.update.downloadingUnknown")
-                    : t("settings.update.downloading", { percent: updateView.percent })}
-                </p>
-                <div
-                  className="update-progress"
-                  role="progressbar"
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={updateView.percent}
-                >
-                  <span style={{ width: `${updateView.percent ?? 15}%` }} />
-                </div>
-              </div>
-            </>
-          )}
-
-          {updateView.phase === "installing" && (
-            <div className="update-body">
-              <p>{t("settings.update.installing")}</p>
-            </div>
-          )}
-
-          {updateView.phase === "error" && (
-            <>
-              {versionLabel(updateView.version)}
-              <div className="update-body">
-                <p>
-                  {t(updateView.install ? "settings.update.installError" : "settings.update.error", {
-                    message: updateView.message,
-                  })}
-                </p>
-                <button className="button button-primary" type="button" onClick={() => void refreshUpdate()}>
-                  {t("settings.update.check")}
-                </button>
-              </div>
-            </>
-          )}
+          <div className="settings-row-actions">
+            {version && <span className="settings-version">{version}</span>}
+            {updateAction && (
+              <button
+                className={`button ${updateAction.primary ? "button-primary" : "button-ghost"} button-small`}
+                type="button"
+                onClick={updateAction.onClick}
+              >
+                {updateAction.label}
+              </button>
+            )}
+          </div>
         </div>
       </div>
-
-      <aside className="settings-boundary-note">
-        <div className="boundary-glyph" aria-hidden="true">Aa</div>
-        <div>
-          <p className="eyebrow">{t("settings.safety.eyebrow")}</p>
-          <h2>{t("settings.safety.title")}</h2>
-          <p>{t("settings.safety.body")}</p>
-          <code>{t("settings.storage")}</code>
-        </div>
-      </aside>
     </section>
   );
 }
