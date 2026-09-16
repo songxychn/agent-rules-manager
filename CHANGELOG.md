@@ -26,6 +26,7 @@
 ### 变更
 
 - CI 增加 Ubuntu 测试，以及 rustfmt、clippy 检查。
+- 未配置 Apple 证书时，发布流水线打未签名 macOS 安装包，不再把空的 `APPLE_*` 环境变量传给打包步骤。
 
 ### 已知限制
 

@@ -48,6 +48,8 @@ bun run tauri:build
 
 未签名的安装包仍可安装。在配置 Apple Developer ID 签名和公证之前，普通 macOS 用户会看到 Gatekeeper 警告。在加入 Authenticode 之前，普通 Windows 用户可能看到 SmartScreen。
 
+未配置这些 secret 时不要把空的 `APPLE_*` 环境变量传给打包步骤，否则 Tauri 会尝试导入证书并失败。配置证书后，流水线会自动启用签名和公证。
+
 macOS 公证可选的仓库 secret：
 
 - `APPLE_CERTIFICATE`
