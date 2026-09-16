@@ -18,6 +18,8 @@ git push origin v0.1.0
 
 同时会上传 `latest.json`，已安装的应用即可在 GitHub Releases 检查更新，并从设置里安装。
 
+macOS 必须同时构建 `app,dmg`；只构建 `dmg` 不会生成更新器归档和签名。所有平台上传完成后，工作流会校验 `latest.json` 的版本号，以及两个 macOS 架构、Linux 和 Windows 的下载地址与非空签名。缺少条目会使工作流失败；该校验不会撤回已经上传的 Release 产物，也不替代更新器安装时的签名验证。
+
 `workflow_dispatch` 会按当前版本号重建同样产物，并保存为草稿 Release。
 
 ## 更新器签名
