@@ -1,9 +1,9 @@
-# Security Policy
+# 安全策略
 
-Agent Rules Manager modifies instruction files consumed by coding agents, so an unsafe write can affect later tool behavior.
+Agent Rules Manager 会改写 coding agent 读取的说明文件，不安全的写入可能影响后续工具行为。
 
-Please use **Security → Report a vulnerability** on this repository when private reporting is available. If that option is unavailable, open an issue asking the maintainer for a private reporting channel without including vulnerability details. Do not post exploit details in a public issue or pull request.
+仓库若已开启私有报告，请使用 **Security → Report a vulnerability**。若没有该入口，请先开一个不含漏洞细节的 Issue，向维护者索取私下渠道。不要在公开 Issue 或 pull request 中贴利用细节。
 
-Do not include real instruction files, credentials, home-directory listings, or chat data in a report. A minimal reproduction built from temporary paths is preferred. Include the affected commit or version, operating system, expected behavior, and the observed filesystem changes.
+报告中不要包含真实规则文件、凭据、主目录列表或聊天数据。请用临时路径构造最小复现。写明受影响的 commit 或版本、操作系统、预期行为，以及实际发生的文件系统变化。
 
-The `0.x` line is pre-release software. Before using it with valuable configuration, review the generated plan and keep the canonical rules library under your own backup or version-control workflow.
+`0.x` 是预发布软件。在用于重要配置前，请审阅生成的计划，并用自己的备份或版本控制保护权威规则库。

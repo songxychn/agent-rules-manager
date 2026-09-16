@@ -267,19 +267,21 @@ impl RulesManager {
         {
             let status = self.inspect_adapter(adapter, &source_path, legacy_source)?;
             let desired_connected = requested[&adapter.id];
-            if desired_connected && status.warning.is_some() {
-                blocked = true;
-                steps.push(PlanStep {
-                    agent_id: status.id,
-                    agent_label: status.label,
-                    target_path: status.target_path,
-                    state: status.state,
-                    desired_connected,
-                    action: "blocked".into(),
-                    summary: status.warning.unwrap(),
-                    requires_confirmation: false,
-                });
-                continue;
+            if desired_connected {
+                if let Some(warning) = status.warning {
+                    blocked = true;
+                    steps.push(PlanStep {
+                        agent_id: status.id,
+                        agent_label: status.label,
+                        target_path: status.target_path,
+                        state: status.state,
+                        desired_connected,
+                        action: "blocked".into(),
+                        summary: warning,
+                        requires_confirmation: false,
+                    });
+                    continue;
+                }
             }
             let mut requires_confirmation = false;
             let (action, summary) = match (desired_connected, status.target_kind) {

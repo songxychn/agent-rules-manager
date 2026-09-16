@@ -1,0 +1,5 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 安全漏洞
+    url: https://github.com/songxychn/agent-rules-manager/blob/master/SECURITY.md
+    about: 不要在公开 Issue 中贴利用细节、真实规则或凭据。请按安全策略私下报告。

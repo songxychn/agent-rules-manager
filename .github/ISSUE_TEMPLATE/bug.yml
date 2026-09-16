@@ -1,0 +1,83 @@
+name: 缺陷报告
+description: 报告安装、接入、回滚、更新或界面问题
+title: "[缺陷] "
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        请勿附带真实规则库、凭据、主目录列表或聊天记录。计划输出、路径和报错请先脱敏。
+
+        安全漏洞请按 [安全策略](https://github.com/songxychn/agent-rules-manager/blob/master/SECURITY.md) 私下报告。
+  - type: dropdown
+    id: os
+    attributes:
+      label: 操作系统
+      options:
+        - macOS
+        - Windows
+        - Linux
+        - 其他
+    validations:
+      required: true
+  - type: input
+    id: os_version
+    attributes:
+      label: 系统版本
+      description: 例如 macOS 15.6、Windows 11 24H2、Ubuntu 22.04。
+      placeholder: macOS 15.6
+    validations:
+      required: true
+  - type: input
+    id: app_version
+    attributes:
+      label: 应用版本
+      description: 安装包文件名、界面显示的版本号，或 git commit。
+      placeholder: 0.1.0 / Agent Rules Manager_0.1.0_aarch64.dmg
+    validations:
+      required: true
+  - type: dropdown
+    id: run_mode
+    attributes:
+      label: 运行方式
+      options:
+        - 桌面安装包
+        - 源码桌面端（tauri dev）
+        - CLI
+        - 浏览器演示
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      description: 从打开应用或运行命令开始，逐步写出。
+      placeholder: |
+        1. 打开桌面端并初始化规则库
+        2. 激活 Profile `work`
+        3. 接入 Codex
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: 预期行为
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: 实际行为
+      description: 请附上脱敏后的报错全文。
+    validations:
+      required: true
+  - type: textarea
+    id: plan
+    attributes:
+      label: 脱敏后的计划输出
+      description: 预览/应用计划、JSON 状态或回滚提示。去掉用户名、规则正文、绝对主目录和凭据。浏览器演示可写「无」。
+  - type: textarea
+    id: extra
+    attributes:
+      label: 其他信息
+      description: 相关 Agent 名称、是否已开启 Windows 开发人员模式等。
