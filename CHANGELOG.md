@@ -6,6 +6,16 @@
 
 ## [未发布]
 
+## [0.1.1] - 2026-09-16
+
+### 修复
+
+- macOS 同时生成 DMG 安装包和带签名的更新器归档，补齐 Apple Silicon / Intel 的更新清单条目，修复检查更新时找不到 `darwin-aarch64` / `darwin-x86_64` 平台的问题。
+
+### 变更
+
+- 发布工作流在所有平台上传完成后校验更新清单的版本、平台覆盖、下载地址及非空签名，缺失条目时报告失败。
+
 ## [0.1.0] - 2026-09-16
 
 ### 新增
@@ -38,5 +48,6 @@
 - 不管理 Skills、MCP、子代理、凭据或模型登录状态。
 - 所有已接入项目跟随本机当前 Profile，不支持每个项目独立选用 Profile。
 
-[未发布]: https://github.com/songxychn/agent-rules-manager/compare/v0.1.0...HEAD
+[未发布]: https://github.com/songxychn/agent-rules-manager/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/songxychn/agent-rules-manager/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/songxychn/agent-rules-manager/releases/tag/v0.1.0
