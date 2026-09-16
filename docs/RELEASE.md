@@ -3,8 +3,8 @@
 推送版本 tag 会构建安装包并挂到 GitHub Release：
 
 ```bash
-git tag v0.1.0
-git push origin v0.1.0
+git tag v0.1.1
+git push origin v0.1.1
 ```
 
 [Release](../.github/workflows/release.yml) 工作流会产出：
