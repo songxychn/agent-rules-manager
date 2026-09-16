@@ -72,16 +72,37 @@ jobs:
       - name: Install frontend dependencies
         run: bun install --frozen-lockfile
 
+      # Empty APPLE_* secrets still become env vars. Tauri then tries `security import`
+      # and macOS bundling fails. Only export them when a certificate is actually set.
+      - name: Export Apple signing environment
+        if: runner.os == 'macOS'
+        env:
+          APPLE_CERTIFICATE_VALUE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD_VALUE: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY_VALUE: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID_VALUE: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD_VALUE: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID_VALUE: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          if [ -z "$APPLE_CERTIFICATE_VALUE" ]; then
+            echo "No Apple certificate configured; macOS bundles will be unsigned."
+            exit 0
+          fi
+          {
+            echo "APPLE_CERTIFICATE<<EOF"
+            echo "$APPLE_CERTIFICATE_VALUE"
+            echo "EOF"
+            echo "APPLE_CERTIFICATE_PASSWORD=$APPLE_CERTIFICATE_PASSWORD_VALUE"
+            echo "APPLE_SIGNING_IDENTITY=$APPLE_SIGNING_IDENTITY_VALUE"
+            echo "APPLE_ID=$APPLE_ID_VALUE"
+            echo "APPLE_PASSWORD=$APPLE_PASSWORD_VALUE"
+            echo "APPLE_TEAM_ID=$APPLE_TEAM_ID_VALUE"
+          } >> "$GITHUB_ENV"
+
       - name: Build installers
         uses: tauri-apps/tauri-action@a6e90ddc4ba4721f294e52b856d3d50e645edc07 # v0 / action-v1.0.0 + retry fix
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_ID: ${{ secrets.APPLE_ID }}
-          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
-          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
