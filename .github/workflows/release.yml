@@ -53,6 +53,13 @@ jobs:
       - name: Select repository Rust toolchain
         run: rustup show
 
+      - name: Read version notes from CHANGELOG
+        id: release-notes
+        shell: bash
+        run: |
+          version=$(bun -e 'console.log(require("./src-tauri/tauri.conf.json").version)')
+          bun tools/release-notes.ts CHANGELOG.md "$version" "$GITHUB_OUTPUT"
+
       - name: Add cross-compile target
         if: matrix.rust-target != ''
         run: rustup target add ${{ matrix.rust-target }}
@@ -108,11 +115,7 @@ jobs:
         with:
           tagName: ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
           releaseName: Agent Rules Manager ${{ github.ref_type == 'tag' && github.ref_name || 'v__VERSION__' }}
-          releaseBody: |
-            Desktop installers for ordinary use. The app can check this release for updates and install them in Settings.
-
-            macOS builds are notarized only when Apple signing secrets are configured. Unsigned downloads may need a right-click → Open on first launch.
-            Windows agent connections still require Developer Mode (or administrator rights) to create symbolic links.
+          releaseBody: ${{ steps.release-notes.outputs.notes }}
           releaseDraft: ${{ github.ref_type != 'tag' }}
           prerelease: false
           uploadUpdaterJson: true
@@ -146,4 +149,7 @@ jobs:
         run: |
           version=$(bun -e 'console.log(require("./src-tauri/tauri.conf.json").version)')
           gh release download "${RELEASE_TAG:-v$version}" --pattern latest.json --dir "$RUNNER_TEMP/updater"
-          bun tools/verify-updater-manifest.ts "$RUNNER_TEMP/updater/latest.json" "$version"
+          bun tools/release-notes.ts CHANGELOG.md "$version" > "$RUNNER_TEMP/updater/notes.md"
+          bun tools/verify-updater-manifest.ts "$RUNNER_TEMP/updater/latest.json" "$version" "$RUNNER_TEMP/updater/notes.md"
+          gh release view "${RELEASE_TAG:-v$version}" --json body --jq .body > "$RUNNER_TEMP/updater/release-body.md"
+          diff -u "$RUNNER_TEMP/updater/notes.md" "$RUNNER_TEMP/updater/release-body.md"

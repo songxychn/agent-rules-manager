@@ -18,6 +18,10 @@ git push origin v0.1.1
 
 同时会上传 `latest.json`，已安装的应用即可在 GitHub Releases 检查更新，并从设置里安装。
 
+每次发布前，在 `CHANGELOG.md` 中填写对应版本的 `## [版本号] - 日期` 段落。发布工作流读取该段正文，同时用于 GitHub Release 说明和 `latest.json.notes`；缺失、重复或空白的版本段落会阻止构建。发布结束时会核对两处说明与 CHANGELOG 一致。
+
+应用内更新说明直接读取 `latest.json.notes`。发布后只编辑 GitHub Release 页面不会改变应用内说明；如需修正文案，必须同步更新清单的 `notes`，并保持版本、下载地址及签名不变。
+
 macOS 必须同时构建 `app,dmg`；只构建 `dmg` 不会生成更新器归档和签名。所有平台上传完成后，工作流会校验 `latest.json` 的版本号，以及两个 macOS 架构、Linux 和 Windows 的下载地址与非空签名。缺少条目会使工作流失败；该校验不会撤回已经上传的 Release 产物，也不替代更新器安装时的签名验证。
 
 `workflow_dispatch` 会按当前版本号重建同样产物，并保存为草稿 Release。
