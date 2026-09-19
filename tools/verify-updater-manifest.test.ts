@@ -32,6 +32,16 @@ describe("release updater manifest", () => {
     expect(() => verifyUpdaterManifest(manifest(), "0.2.0")).toThrow("Expected updater version");
   });
 
+  it("rejects stale updater notes even when the version and platforms are valid", () => {
+    expect(() => verifyUpdaterManifest({ ...manifest(), notes: "Desktop installers" }, "0.1.0", "修复更新。"))
+      .toThrow("Updater notes do not match");
+  });
+
+  it("accepts matching notes with a trailing file newline", () => {
+    expect(() => verifyUpdaterManifest({ ...manifest(), notes: "### 修复\n\n- 更新。" }, "0.1.0", "### 修复\n\n- 更新。\n"))
+      .not.toThrow();
+  });
+
   it.each(["", "http://example.com/app.tar.gz", "not a URL"])("rejects invalid download URL %j", (url) => {
     const release = manifest();
     release.platforms["darwin-aarch64"].url = url;
