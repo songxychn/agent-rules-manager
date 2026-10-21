@@ -7,11 +7,15 @@ const requiredPlatforms = [
   "windows-x86_64",
 ];
 
-export function verifyUpdaterManifest(value: unknown, version: string): void {
+export function verifyUpdaterManifest(value: unknown, version: string, expectedNotes?: string): void {
   if (!value || typeof value !== "object") throw new Error("Invalid updater manifest");
   const manifest = value as Record<string, unknown>;
   if (manifest.version !== version) {
     throw new Error(`Expected updater version ${version}, got ${manifest.version}`);
+  }
+  if (expectedNotes !== undefined &&
+      (typeof manifest.notes !== "string" || manifest.notes.trim() !== expectedNotes.trim())) {
+    throw new Error("Updater notes do not match the CHANGELOG release section");
   }
   const platforms = manifest.platforms as
     | Record<string, { url?: unknown; signature?: unknown }>
@@ -32,10 +36,13 @@ export function verifyUpdaterManifest(value: unknown, version: string): void {
 }
 
 if (import.meta.main) {
-  const [path, version] = process.argv.slice(2);
+  const [path, version, notesPath] = process.argv.slice(2);
   if (!path || !version) {
-    throw new Error("Usage: bun tools/verify-updater-manifest.ts <latest.json> <version>");
+    throw new Error("Usage: bun tools/verify-updater-manifest.ts <latest.json> <version> [notes.md]");
   }
-  verifyUpdaterManifest(JSON.parse(await readFile(path, "utf8")), version);
+  verifyUpdaterManifest(
+    JSON.parse(await readFile(path, "utf8")), version,
+    notesPath ? await readFile(notesPath, "utf8") : undefined,
+  );
   console.log(`Updater manifest ${version} includes all supported platforms.`);
 }
