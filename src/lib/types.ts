@@ -1,4 +1,45 @@
 export type DeployMode = "include" | "symlink";
+
+export interface GitSyncConfig { remote: string; branch: string }
+export interface GitSyncResolution {
+  id: string;
+  choice: "keepLocal" | "useRemote" | "keepBoth";
+  newProfileId?: string;
+}
+export interface GitSyncRequest extends GitSyncConfig { resolutions: GitSyncResolution[] }
+export interface GitSyncChange {
+  path: string;
+  localBefore: string | null;
+  localAfter: string | null;
+  remoteBefore: string | null;
+  remoteAfter: string | null;
+}
+export interface GitSyncVersion { path: string; content: string }
+export interface GitSyncConflict {
+  id: string;
+  base: GitSyncVersion[];
+  local: GitSyncVersion[];
+  remote: GitSyncVersion[];
+  canKeepBoth: boolean;
+  resolved: boolean;
+}
+export interface GitSyncPlan {
+  token: string;
+  config: GitSyncConfig;
+  remoteCommit: string | null;
+  changes: GitSyncChange[];
+  directories: { path: string; action: "create" | "remove" }[];
+  conflicts: GitSyncConflict[];
+  blockers: string[];
+  blocked: boolean;
+  connectionChanged: boolean;
+}
+export interface GitSyncOutcome {
+  changed: string[];
+  backupId?: string | null;
+  pushed: boolean;
+  pushError?: string | null;
+}
 export type TargetState = "inSync" | "ready" | "drifted" | "conflict";
 export type TargetKind =
   | "missing"

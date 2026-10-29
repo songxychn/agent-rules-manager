@@ -193,6 +193,40 @@ Adapter 只处理 Agent 协议差异；同步的 Profile 内容保持 CLI 和 Pr
 - 本目录是已核对原生入口的支持清单，不保证覆盖所有产品版本。需要启动参数、手动设置或特定插件才能读取规则的其他工具，不会被标记为自动接入。
 
 
+## Git 同步（手动）
+
+侧栏「Git 同步」可连接已有 Git 远端，把规则源在机器间共享。需要本机安装 Git；支持无内嵌凭据的 HTTPS、SSH 和绝对本地 Git 路径，认证使用系统 Git credential helper 或 SSH agent / 配置。SSH 使用非交互模式，首次认证、主机信任和密钥解锁需先在终端完成。本版不含自动同步、GitHub 登录或自动创建远端仓库。
+
+1. 输入专用规则仓库地址和分支。首次默认 `master`；已有仓库请填写实际使用的分支。远端分支可为空，也可包含 v3 规则库。空的本机规则目录可以直接从远端导入。
+2. 点击「检查并预览」，核对本机和远端各自将改变的文件及修改前后全文。预览只在独立临时 Git 仓库中检查远端，不改真实规则源、连接设置或激活状态。
+3. 有冲突时对比基准、本机、远端，选择「保留本机」「使用远端」或「两个都保留」。保留两份需要给远端副本一个未占用的 Profile ID。删除与修改的冲突只提供前两种选择。选择后重新检查最终结果，所有冲突解决后才能应用。
+4. 确认同步会先备份并应用本机规则源和连接状态，再以绑定预览版本的快进推送发布。任一端或本机选择变化会使预览失效；推送期间发生的并发更新、删除或回退也不会被覆盖。
+5. **同步与激活分离。** 当前启用的 Profile 正文更新后，Runtime 标记为待刷新；到 Profile 页预览并激活后 Agent 才读取新规则。同步不改 `current`、`machine.json` 或 Agent 接入，也不会删除本机当前启用的 Profile；需先切换再同步删除。
+
+传输严格限定为 `schema.json`、`profiles/<id>/profile.json` 和 `profiles/<id>/AGENTS.md`。不会提交规则库其他文件，也不操作规则库自身的 `.git` 或暂存区。远端已有普通 `.gitignore` 会原样保留；其他额外路径、链接、子模块、可执行源文件、无效格式均会阻止同步。首版支持 v3、最多 256 个 Profile、单文件 1 MiB、源文件合计 16 MiB，以及 SHA-1 Git 仓库。每个 Git 子命令超时为 45 秒。
+
+首次连接或更换远端没有共同同步基准，同名但不同的 Profile 会明确列为冲突。已连接后按上次同步基准进行三方判断；不同 Profile 的修改可以组合，同一 Profile 的元数据字段与正文可独立组合，双方不同地修改同一正文时保留为冲突，不按时间选赢家。
+
+推送失败会明确报告「本机规则源已保存，上传失败」，保留本机备份；重新检查后可重试。本机操作历史可以恢复同步造成的本机变化并检查漂移，**不会撤销已经完成的远端推送**；要发布恢复结果，需要再同步。连接地址与同步基准留在应用状态目录，不进入规则仓库。浏览器演示包含可操作的远端更新、冲突、同步和独立激活，刷新会重置。
+
+CLI 示例（首次预览后保存输出中的 `token`；后续可省略已保存的地址与分支）：
+
+```bash
+cargo run -p arm-cli -- sync --remote git@github.com:you/agent-rules.git --branch master --json
+# 核对以上预览，再传入其 token；有冲突时先按下文选择并重新预览
+cargo run -p arm-cli -- sync --remote git@github.com:you/agent-rules.git --branch master --apply --token '<预览 token>' --json
+
+# decisions.json 是冲突处理数组，例如：
+# [{"id":"profile:work","choice":"keepBoth","newProfileId":"work-remote"}]
+# choice 还可为 keepLocal / useRemote；schema 冲突的 id 为 schema
+cargo run -p arm-cli -- sync --remote git@github.com:you/agent-rules.git --branch master --resolutions decisions.json --json
+cargo run -p arm-cli -- sync --remote git@github.com:you/agent-rules.git --branch master --resolutions decisions.json --apply --token '<重新预览 token>' --json
+
+# 同步后单独预览、激活
+cargo run -p arm-cli -- profiles activate work
+cargo run -p arm-cli -- profiles activate work --apply
+```
+
 ## 操作历史与恢复
 
 侧栏、Profile 页和控制台的「操作历史」入口统一展示本机规则库操作、全局及项目 Agent 接入，以及恢复操作。列表支持按类型筛选；时间使用本地时区，快照编号和完整路径在详情中查看。

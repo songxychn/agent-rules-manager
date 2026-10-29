@@ -63,7 +63,7 @@ export function HistoryPage({ libraryRoot, onRestored }: {
     }).format(parsed);
   };
   const title = (record: HistoryRecord) => {
-    const operations = ["initialize", "upgradeLibrary", "createProfile", "deleteProfile", "activateProfile", "connectionChange", "restoreHistory", "historyBaseline"];
+    const operations = ["initialize", "upgradeLibrary", "createProfile", "deleteProfile", "activateProfile", "connectionChange", "restoreHistory", "historyBaseline", "gitSync"];
     const label = t(`history.${operations.includes(record.operation) ? record.operation : "unknown"}` as "history.initialize");
     const subjects = record.subjects.map((subject) => {
       if (record.operation === "restoreHistory") return date(subject);

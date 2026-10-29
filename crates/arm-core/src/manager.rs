@@ -73,6 +73,26 @@ struct TargetInspection {
 }
 
 impl RulesManager {
+    pub fn git_sync_config(&self) -> Result<Option<crate::GitSyncConfig>, ArmError> {
+        library::git_sync::config(&self.library_root, &self.state_root)
+    }
+
+    pub fn preview_git_sync(
+        &self,
+        request: &crate::GitSyncRequest,
+    ) -> Result<crate::GitSyncPlan, ArmError> {
+        library::git_sync::preview(&self.library_root, &self.state_root, request)
+    }
+
+    pub fn apply_git_sync(
+        &self,
+        request: &crate::GitSyncRequest,
+        token: &str,
+    ) -> Result<crate::GitSyncOutcome, ArmError> {
+        let _guard = crate::history::MutationGuard::acquire(&self.state_root)?;
+        library::git_sync::apply(&self.library_root, &self.state_root, request, token)
+    }
+
     pub fn new(library_root: PathBuf, state_root: PathBuf, home: &Path) -> Self {
         Self {
             library_root,
