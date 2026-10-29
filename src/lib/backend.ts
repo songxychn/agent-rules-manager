@@ -15,6 +15,10 @@ import type {
 } from "./types";
 import { buildProjectionPlan } from "./plan";
 import { demoAgents } from "./agentCatalog";
+import { applyDemoSync, previewDemoSync, demoSyncSources, type DemoSyncState } from "./gitSyncDemo";
+import type { GitSyncConfig, GitSyncRequest, GitSyncPlan, GitSyncOutcome } from "./types";
+
+let demoSyncState: DemoSyncState = {};
 
 const isTauri = "__TAURI_INTERNALS__" in window;
 
@@ -141,14 +145,14 @@ let demoLibraryRollbackSnapshot: WorkspaceSnapshot | undefined;
 let demoLibraryRollbackPaths: string[] | undefined;
 let demoLibraryRollbackId: string | undefined;
 
-type DemoPoint = { record: HistoryRecord; snapshot: WorkspaceSnapshot; projects: [string, WorkspaceSnapshot["agents"]][] };
+type DemoPoint = { record: HistoryRecord; snapshot: WorkspaceSnapshot; projects: [string, WorkspaceSnapshot["agents"]][]; sync: DemoSyncState };
 const demoHistory: DemoPoint[] = [];
 let demoHistorySequence = 0;
 function recordDemo(operation: string, subjects: string[], paths: string[], scope: HistoryRecord["scope"] = "profiles") {
   const record: HistoryRecord = {
     id: `demo-history-${++demoHistorySequence}`, createdAt: new Date().toISOString(), operation, subjects, paths, scope, restorable: true,
   };
-  demoHistory.push({ record, snapshot: structuredClone(demoSnapshot), projects: structuredClone([...demoProjects]) });
+  demoHistory.push({ record, snapshot: structuredClone(demoSnapshot), projects: structuredClone([...demoProjects]), sync: structuredClone(demoSyncState) });
 }
 // Explicit browser-only sample history; no native files are inspected or changed.
 const demoInitial = structuredClone(demoSnapshot);
@@ -172,16 +176,22 @@ function demoRestorePlan(targetId: string): RestorePlan {
   if (index < 0) throw new Error("Unknown recovery point");
   const target = demoHistory[index];
   const steps: RestoreStep[] = [];
-  const add = (path: string, before: string, after: string) => {
-    if (before !== after) steps.push({ path, before, after, action: after === "missing" ? "remove" : after.startsWith("link:") ? "restoreLink" : "restoreFile" });
+  const add = (path: string, before: string, after: string, beforeContent?: string, afterContent?: string) => {
+    if (before !== after || beforeContent !== afterContent) steps.push({ path, before, after, beforeContent, afterContent, action: after === "missing" ? "remove" : after.startsWith("link:") ? "restoreLink" : "restoreFile" });
   };
+  const beforeSources = demoSyncSources(demoSnapshot), afterSources = demoSyncSources(target.snapshot);
+  const beforeSync = demoSyncState.config ? JSON.stringify(demoSyncState) : undefined;
+  const afterSync = target.sync.config ? JSON.stringify(target.sync) : undefined;
+  add("<local state>/git-sync/demo.json", beforeSync ? "file" : "missing", afterSync ? "file" : "missing", beforeSync, afterSync);
   add("<local state>/machine.json", `profile:${demoSnapshot.activeProfileId ?? "—"}`, `profile:${target.snapshot.activeProfileId ?? "—"}`);
   const ids = new Set([...demoSnapshot.profiles, ...target.snapshot.profiles].map((p) => p.id));
   for (const id of ids) {
     const before = demoSnapshot.profiles.find((p) => p.id === id);
     const after = target.snapshot.profiles.find((p) => p.id === id);
-    add(`${demoRoot}/profiles/${id}/AGENTS.md`, before ? "file" : "missing", after ? "file" : "missing");
-    add(`${demoRoot}/profiles/${id}/profile.json`, before ? "file" : "missing", after ? "file" : "missing");
+    for (const name of ["AGENTS.md", "profile.json"]) {
+      const path = `profiles/${id}/${name}`;
+      add(`${demoRoot}/${path}`, before ? "file" : "missing", after ? "file" : "missing", beforeSources[path], afterSources[path]);
+    }
   }
   const compareAgents = (before: WorkspaceSnapshot["agents"], after: WorkspaceSnapshot["agents"]) => {
     for (const agent of before) {
@@ -196,7 +206,7 @@ function demoRestorePlan(targetId: string): RestorePlan {
   compareAgents(demoSnapshot.agents, target.snapshot.agents);
   const beforeProjects = new Map(demoProjects), afterProjects = new Map(target.projects);
   for (const root of new Set([...beforeProjects.keys(), ...afterProjects.keys()])) compareAgents(beforeProjects.get(root) ?? [], afterProjects.get(root) ?? []);
-  return { target: structuredClone(target.record), token: JSON.stringify([demoHistory.map((p) => p.record.id), demoSnapshot, [...demoProjects]]),
+  return { target: structuredClone(target.record), token: JSON.stringify([demoHistory.map((p) => p.record.id), demoSnapshot, [...demoProjects], demoSyncState]),
     operations: demoHistory.slice(index + 1).map((p) => structuredClone(p.record)).reverse(), steps, conflicts: [], blocked: false };
 }
 
@@ -227,6 +237,22 @@ function mutation(paths: string[]): LibraryMutationOutcome {
 
 export const backend = {
   isTauri,
+  async gitSyncConfig(libraryRoot?: string): Promise<GitSyncConfig | null> {
+    if (isTauri) return invoke("get_git_sync_config", { libraryRoot });
+    return structuredClone(demoSyncState.config ?? null);
+  },
+  async previewGitSync(request: GitSyncRequest, libraryRoot?: string): Promise<GitSyncPlan> {
+    if (isTauri) return invoke("preview_git_sync", { libraryRoot, request });
+    return previewDemoSync(demoSnapshot, demoSyncState, request).plan;
+  },
+  async applyGitSync(request: GitSyncRequest, token: string, libraryRoot?: string): Promise<GitSyncOutcome> {
+    if (isTauri) return invoke("apply_git_sync", { libraryRoot, request, token });
+    const plan = applyDemoSync(demoSnapshot, demoSyncState, request, token);
+    const changed = plan.changes.filter((c) => c.localBefore !== c.localAfter).map((c) => `${demoRoot}/${c.path}`);
+    changed.push("<local state>/git-sync/demo.json");
+    recordDemo("gitSync", [], changed);
+    return { changed, backupId: demoHistory.at(-1)!.record.id, pushed: true };
+  },
   async history(libraryRoot?: string): Promise<HistoryRecord[]> {
     if (isTauri) return invoke("get_operation_history", { libraryRoot });
     return demoHistory.map((p) => structuredClone(p.record)).reverse();
@@ -241,6 +267,7 @@ export const backend = {
     if (plan.token !== token || plan.blocked || !plan.steps.length) throw new Error("Recovery preview is stale or has no changes; preview again");
     const target = demoHistory.find((p) => p.record.id === targetId)!;
     demoSnapshot = structuredClone(target.snapshot);
+    demoSyncState = structuredClone(target.sync);
     demoProjects.clear();
     for (const [root, agents] of structuredClone(target.projects)) demoProjects.set(root, agents);
     recordDemo("restoreHistory", [target.record.createdAt], plan.steps.map((s) => s.path), "recovery");

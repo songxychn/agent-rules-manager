@@ -2790,3 +2790,34 @@ code {
 @media (max-width: 600px) { .history-heading h2 { font-size: 19px; } .history-preview { padding: 18px; } .history-heading { gap: 10px; } }
 
 .history-content pre { max-height: 280px; overflow: auto; padding: 12px; border: 1px solid #dce6df; background: #fff; font-size: 12px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* Manual Git source sync */
+.git-sync-page { max-width: 1180px; margin: 0 auto; display: grid; gap: 20px; }
+.git-sync-page h2, .git-sync-page h3, .git-sync-page h4, .git-sync-page h5 { margin: 0 0 10px; }
+.sync-boundary, .sync-demo-note { margin: 0; line-height: 1.75; color: #52685e; }
+.sync-demo-note { padding: 12px 16px; border-radius: 12px; background: #eef4f0; }
+.sync-config { display: grid; grid-template-columns: minmax(0, 1fr) 160px auto; align-items: end; gap: 14px; padding: 22px; background: #fff; border: 1px solid #dce6df; border-radius: 16px; }
+.sync-config label, .sync-conflict label { display: grid; gap: 8px; font-size: 13px; font-weight: 600; }
+.sync-config input, .sync-conflict input, .sync-conflict select { width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid #cbd8ce; border-radius: 8px; background: #fff; color: inherit; font: inherit; }
+.sync-config p { grid-column: 1 / -1; margin: 0; font-size: 12px; line-height: 1.75; color: #52685e; }
+.sync-preview { display: grid; gap: 24px; min-width: 0; }
+.sync-summary { padding: 20px; border: 1px solid #cbd8ce; border-radius: 14px; background: #f5f9f6; }
+.sync-summary p { margin: 6px 0 0; font-size: 13px; overflow-wrap: anywhere; }
+.sync-review-needed { color: #8a5219; }
+.sync-conflict { min-width: 0; display: grid; gap: 14px; margin: 16px 0; padding: 18px; border: 1px solid #d5b683; border-radius: 12px; }
+.sync-conflict legend { padding: 0 8px; font-weight: 600; overflow-wrap: anywhere; }
+.sync-conflict select, .sync-conflict input { max-width: 440px; }
+.sync-versions, .sync-compare { display: grid; gap: 14px; margin-top: 14px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.sync-compare { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.sync-versions article, .sync-compare article { min-width: 0; }
+.git-sync-page pre { margin: 8px 0; padding: 14px; border: 1px solid #dce6df; border-radius: 8px; background: #fff; max-height: 360px; overflow: auto; font-size: 12px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sync-versions code { font-size: 11px; overflow-wrap: anywhere; }
+.sync-file { padding: 16px 18px; margin-top: 12px; border: 1px solid #dce6df; border-radius: 12px; background: #fff; }
+.sync-file summary, .sync-conflict summary { cursor: pointer; line-height: 1.7; overflow-wrap: anywhere; }
+.sync-file summary span { display: inline-block; margin-left: 16px; color: #52685e; font-size: 12px; }
+.sync-file h4 { margin-top: 18px; }
+.sync-actions { display: flex; justify-content: flex-end; gap: 12px; }
+.git-sync-page mark { color: inherit; border-radius: 2px; }
+.sync-removed { background: #ffe1dc; }
+.sync-added { background: #d9f0df; }
+@media (max-width: 900px) { .sync-config { grid-template-columns: 1fr; } .sync-versions, .sync-compare { grid-template-columns: 1fr; } }

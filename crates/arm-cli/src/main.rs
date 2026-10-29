@@ -31,6 +31,25 @@ struct Cli {
 
 #[derive(Debug, Subcommand)]
 enum Command {
+    /// Preview manual Git source sync. Applying never activates rules.
+    Sync {
+        /// Existing dedicated Git remote (HTTPS, SSH, or absolute local path).
+        #[arg(long)]
+        remote: Option<String>,
+        /// Remote branch; defaults to saved branch, or master for first use.
+        #[arg(long)]
+        branch: Option<String>,
+        /// JSON array of conflict decisions from the preview.
+        #[arg(long)]
+        resolutions: Option<PathBuf>,
+        /// Apply the exact preview identified by --token.
+        #[arg(long)]
+        apply: bool,
+        #[arg(long, requires = "apply")]
+        token: Option<String>,
+        #[arg(long)]
+        json: bool,
+    },
     /// Preview, initialize, or upgrade the Profile library.
     Init {
         /// Apply the previewed initialization plan.
@@ -140,6 +159,73 @@ fn run() -> Result<(), ArmError> {
     };
 
     match cli.command {
+        Command::Sync {
+            remote,
+            branch,
+            resolutions,
+            apply,
+            token,
+            json,
+        } => {
+            let saved = manager.git_sync_config()?;
+            let remote = remote
+                .or_else(|| saved.as_ref().map(|c| c.remote.clone()))
+                .ok_or_else(|| {
+                    ArmError::Blocked("Provide --remote for the first sync preview".into())
+                })?;
+            let branch = branch
+                .or_else(|| saved.map(|c| c.branch))
+                .unwrap_or_else(|| "master".into());
+            let resolutions = match resolutions {
+                Some(path) => {
+                    serde_json::from_str(&std::fs::read_to_string(&path).map_err(|e| {
+                        ArmError::Io {
+                            path: path.display().to_string(),
+                            source: e,
+                        }
+                    })?)?
+                }
+                None => Vec::new(),
+            };
+            let request = arm_core::GitSyncRequest {
+                remote,
+                branch,
+                resolutions,
+            };
+            if apply {
+                let token = token.ok_or_else(|| {
+                    ArmError::Blocked("Preview first, then pass its --token to apply".into())
+                })?;
+                let outcome = manager.apply_git_sync(&request, &token)?;
+                if json {
+                    print_json(&outcome)?;
+                } else {
+                    println!(
+                        "Applied {} local path change(s). Activation is a separate operation.",
+                        outcome.changed.len()
+                    );
+                    if let Some(id) = outcome.backup_id {
+                        println!("Local rollback snapshot: {id}");
+                    }
+                    if let Some(error) = &outcome.push_error {
+                        eprintln!("Local sources were saved, but upload failed. Preview again to retry: {error}");
+                    } else {
+                        println!("Remote is synchronized.");
+                    }
+                }
+                if outcome.push_error.is_some() {
+                    return Err(ArmError::Blocked(
+                        "Remote upload failed; local changes are backed up. Preview again.".into(),
+                    ));
+                }
+            } else {
+                let plan = manager.preview_git_sync(&request)?;
+                if !json {
+                    println!("Source sync preview (activation unchanged). Resolve conflicts, preview again, then apply with --token {}", plan.token);
+                }
+                print_json(&plan)?;
+            }
+        }
         Command::Init { apply, json } => {
             if apply {
                 print_mutation(manager.initialize()?, json)?;

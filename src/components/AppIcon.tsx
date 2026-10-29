@@ -1,6 +1,6 @@
 import brandMark from "../../assets/icon-source.svg?no-inline";
 
-type AppIconName = "control" | "profiles" | "settings" | "folder" | "rollback" | "bell";
+type AppIconName = "control" | "profiles" | "settings" | "folder" | "rollback" | "bell" | "sync";
 
 export function BrandMark() {
   return (
@@ -11,6 +11,7 @@ export function BrandMark() {
 export function AppIcon({ name }: { name: AppIconName }) {
   return (
     <svg className="app-icon" viewBox="0 0 24 24" aria-hidden="true">
+      {name === "sync" && <><path d="M4 8h15l-4-4M20 16H5l4 4M20 8v4M4 16v-4" /></>}
       {name === "control" && (
         <>
           <rect x="4" y="4" width="6" height="6" rx="1.5" />
