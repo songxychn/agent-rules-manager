@@ -66,6 +66,7 @@ export interface AgentStatus {
   note?: string;
   docsUrl?: string;
   maxChars?: number;
+  maxBytes?: number;
   warning?: string;
   detail: string;
 }

@@ -675,8 +675,18 @@ impl RulesManager {
         let inspection =
             inspect_projection_target(&adapter.target_path, source_path, legacy_source)?;
         let (installed, detection_detail) = detect_adapter(adapter);
-        let warning = adapter.max_chars.and_then(|limit| {
-            fs::read_to_string(source_path).ok().and_then(|content| {
+        let warning = adapter
+            .max_chars
+            .or(adapter.max_bytes)
+            .and_then(|_| fs::read_to_string(source_path).ok())
+            .and_then(|content| {
+            if let Some(limit) = adapter.max_bytes {
+                let count = content.len();
+                if count > limit {
+                    return Some(format!("Rules contain {count} UTF-8 bytes; {} supports at most {limit} bytes per file. Shorten the Profile before connecting; rules are never truncated.", adapter.label));
+                }
+            }
+            adapter.max_chars.and_then(|limit| {
                 let count = content.encode_utf16().count();
                 (count > limit).then(|| format!("Rules contain {count} characters; {} supports at most {limit}. Shorten the Profile before connecting; rules are never truncated.", adapter.label))
             })
@@ -695,6 +705,7 @@ impl RulesManager {
             note: adapter.note.clone(),
             docs_url: adapter.docs_url.clone(),
             max_chars: adapter.max_chars,
+            max_bytes: adapter.max_bytes,
             warning,
             detail: inspection.detail,
         })
@@ -1786,7 +1797,358 @@ mod tests {
     }
 
     #[test]
-    fn overlong_rules_block_connecting_without_truncation_and_allow_disconnect() {
+    fn windows_zed_detection_uses_native_appdata_without_enabling_the_old_entry() {
+        let (_root, previous, home) = fixture();
+        let roaming = home.join("roaming");
+        fs::create_dir_all(roaming.join("Zed")).unwrap();
+        let env = |name: &str| (name == "APPDATA").then(|| roaming.clone());
+        let manager = RulesManager::with_adapters(
+            previous.library_root.clone(),
+            previous.state_root.clone(),
+            crate::adapters::test_windows_adapters(&home, &env),
+        );
+        let snapshot = manager.snapshot().unwrap();
+        let native = snapshot
+            .agents
+            .iter()
+            .find(|a| a.id == "zed-windows")
+            .unwrap();
+        let legacy = snapshot.agents.iter().find(|a| a.id == "zed").unwrap();
+        assert!(native.installed);
+        assert!(native
+            .detection_detail
+            .contains(&roaming.join("Zed").display().to_string()));
+        assert!(!native.connected);
+        assert!(!legacy.installed);
+        assert!(!roaming.join("Zed/AGENTS.md").exists());
+        assert!(!home.join(".config/zed").exists());
+    }
+
+    #[test]
+    fn windows_zed_preserves_old_connections_native_files_and_rollback_protection() {
+        let (_root, previous, home) = fixture();
+        previous.initialize().unwrap();
+        previous.plan(&["zed".into()]).unwrap();
+        previous.apply(&["zed".into()]).unwrap();
+        let old_target = home.join(".config/zed/AGENTS.md");
+        let old_link = fs::read_link(&old_target).unwrap();
+        let roaming = home.join("redirected appdata");
+        let native = roaming.join("Zed/AGENTS.md");
+        fs::create_dir_all(native.parent().unwrap()).unwrap();
+        fs::write(&native, "existing Windows Zed rules").unwrap();
+        let unrelated = native.parent().unwrap().join("settings.json");
+        fs::write(&unrelated, "{}").unwrap();
+        let env = |name: &str| (name == "APPDATA").then(|| roaming.clone());
+        let manager = RulesManager::with_adapters(
+            previous.library_root.clone(),
+            previous.state_root.clone(),
+            crate::adapters::test_windows_adapters(&home, &env),
+        );
+        let snapshot = manager.snapshot().unwrap();
+        let old = snapshot.agents.iter().find(|a| a.id == "zed").unwrap();
+        assert!(old.connected);
+        assert_eq!(PathBuf::from(&old.target_path), old_target);
+        let plan = manager.plan(&["zed-windows".into()]).unwrap();
+        assert!(!plan.blocked);
+        assert_eq!(plan.change_count, 1);
+        assert_eq!(plan.confirmation_count, 1);
+        assert_eq!(PathBuf::from(&plan.steps[0].target_path), native);
+        assert_eq!(
+            fs::read_to_string(&native).unwrap(),
+            "existing Windows Zed rules"
+        );
+        assert!(matches!(
+            manager.apply(&["zed-windows".into()]),
+            Err(ArmError::ConfirmationRequired(_))
+        ));
+        let applied = manager
+            .apply_confirmed(&["zed-windows".into()], true)
+            .unwrap();
+        let preserved =
+            PathBuf::from(applied.preserved_backup_dir.unwrap()).join("00-zed-windows/AGENTS.md");
+        assert_eq!(
+            fs::read_to_string(preserved).unwrap(),
+            "existing Windows Zed rules"
+        );
+        assert_eq!(fs::read_link(&old_target).unwrap(), old_link);
+        let native_link = fs::read_link(&native).unwrap();
+
+        let disconnect = [ConnectionChange {
+            agent_id: "zed-windows".into(),
+            connected: false,
+        }];
+        assert_eq!(
+            manager.plan_connections(&disconnect).unwrap().change_count,
+            1
+        );
+        manager.apply_connections(&disconnect).unwrap();
+        assert!(!native.is_symlink());
+        manager.rollback_latest().unwrap();
+        assert_eq!(fs::read_link(&native).unwrap(), native_link);
+        fs::remove_file(&native).unwrap();
+        fs::write(&native, "edited after connecting").unwrap();
+        assert!(matches!(
+            manager.rollback_latest(),
+            Err(ArmError::RollbackDrift(_))
+        ));
+        assert_eq!(
+            fs::read_to_string(&native).unwrap(),
+            "edited after connecting"
+        );
+        fs::remove_file(&native).unwrap();
+        create_symlink(&native_link, &native).unwrap();
+        manager.rollback_latest().unwrap();
+        assert_eq!(
+            fs::read_to_string(&native).unwrap(),
+            "existing Windows Zed rules"
+        );
+        assert_eq!(fs::read_link(&old_target).unwrap(), old_link);
+        assert_eq!(fs::read_to_string(&unrelated).unwrap(), "{}");
+        // A backup made with the earlier adapter set still restores its original path.
+        manager.rollback_latest().unwrap();
+        assert!(!old_target.exists());
+        assert_eq!(
+            fs::read_to_string(&native).unwrap(),
+            "existing Windows Zed rules"
+        );
+    }
+
+    #[test]
+    fn antigravity_checks_utf8_bytes_including_the_generated_header() {
+        let (_root, manager, _home) = fixture();
+        manager.initialize().unwrap();
+        for (content, blocked) in [
+            ("a".repeat(12001), false),
+            ("中".repeat(8100), true),
+            ("😀".repeat(6100), true),
+        ] {
+            fs::write(
+                manager.library_root.join("profiles/default/AGENTS.md"),
+                content,
+            )
+            .unwrap();
+            manager.activate_profile("default").unwrap();
+            let plan = manager.plan(&["ag".into(), "gemini".into()]).unwrap();
+            assert_eq!(plan.blocked, blocked);
+            assert_eq!(plan.steps.len(), 1);
+            assert_eq!(plan.change_count, usize::from(!blocked));
+            let snapshot = manager.snapshot().unwrap();
+            let agent = snapshot.agents.iter().find(|a| a.id == "gemini").unwrap();
+            assert_eq!(agent.max_bytes, Some(24000));
+            assert_eq!(agent.max_chars, None);
+            assert_eq!(agent.warning.is_some(), blocked);
+            if blocked {
+                assert!(plan.steps[0].summary.contains("UTF-8 bytes"));
+                assert!(plan.steps[0].summary.contains("24000"));
+                assert!(manager.apply(&["ag".into()]).is_err());
+            }
+        }
+    }
+
+    #[test]
+    fn current_cline_keeps_both_old_targets_and_their_connections() {
+        let (_root, manager, home) = fixture();
+        manager.initialize().unwrap();
+        manager.plan(&["cline-cli".into(), "cline".into()]).unwrap();
+        manager
+            .apply(&["cline-cli".into(), "cline".into()])
+            .unwrap();
+        let legacy_cli = home.join(".cline/data/settings/rules/agent-rules.md");
+        let legacy_editor = manager
+            .adapters
+            .iter()
+            .find(|a| a.id == "cline")
+            .unwrap()
+            .target_path
+            .clone();
+        let cli_link = fs::read_link(&legacy_cli).unwrap();
+        let editor_link = fs::read_link(&legacy_editor).unwrap();
+        let current = home.join(".cline/rules/agent-rules.md");
+        let plan = manager
+            .plan(&["cline-global".into(), "cline-current".into()])
+            .unwrap();
+        assert_eq!(plan.change_count, 1);
+        assert_eq!(PathBuf::from(&plan.steps[0].target_path), current);
+        assert!(!current.exists());
+        manager.apply(&["cline-current".into()]).unwrap();
+        assert!(current.is_symlink());
+        assert_eq!(fs::read_link(&legacy_cli).unwrap(), cli_link);
+        assert_eq!(fs::read_link(&legacy_editor).unwrap(), editor_link);
+        manager.rollback_latest().unwrap();
+        assert!(!current.exists());
+        assert_eq!(fs::read_link(&legacy_cli).unwrap(), cli_link);
+        assert_eq!(fs::read_link(&legacy_editor).unwrap(), editor_link);
+    }
+
+    #[test]
+    fn chatgpt_alone_is_not_a_codex_installation_marker() {
+        let (_root, mut manager, home) = fixture();
+        for adapter in &mut manager.adapters {
+            adapter
+                .detection_paths
+                .retain(|path| path.starts_with(&home));
+            adapter.command_names.clear();
+        }
+        fs::create_dir_all(home.join("Applications/ChatGPT.app")).unwrap();
+        let codex_installed = || {
+            manager
+                .snapshot()
+                .unwrap()
+                .agents
+                .into_iter()
+                .find(|a| a.id == "codex")
+                .unwrap()
+                .installed
+        };
+        assert!(!codex_installed());
+        fs::create_dir_all(home.join("Applications/Codex.app")).unwrap();
+        assert!(codex_installed());
+    }
+
+    #[test]
+    fn devin_aliases_share_one_target_without_changing_legacy_cascade() {
+        let (_root, manager, home) = fixture();
+        manager.initialize().unwrap();
+        manager.plan(&["windsurf".into()]).unwrap();
+        manager.apply(&["windsurf".into()]).unwrap();
+        let legacy = home.join(".codeium/windsurf/memories/global_rules.md");
+        let legacy_link = fs::read_link(&legacy).unwrap();
+        let native = home.join(".devin/global_rules.md");
+        fs::create_dir_all(native.parent().unwrap()).unwrap();
+        fs::write(&native, "personal Devin rules").unwrap();
+        let fallback = home.join(".windsurf/global_rules.md");
+        fs::create_dir_all(fallback.parent().unwrap()).unwrap();
+        fs::write(&fallback, "legacy imported rules").unwrap();
+
+        let selection = ["devin-desktop".into(), "devin".into()];
+        let plan = manager.plan(&selection).unwrap();
+        assert!(!plan.blocked);
+        assert_eq!(plan.change_count, 1);
+        assert_eq!(plan.confirmation_count, 1);
+        assert_eq!(PathBuf::from(&plan.steps[0].target_path), native);
+        assert_eq!(fs::read_to_string(&native).unwrap(), "personal Devin rules");
+        assert!(matches!(
+            manager.apply(&selection),
+            Err(ArmError::ConfirmationRequired(_))
+        ));
+        assert!(manager
+            .plan_connections(&[
+                ConnectionChange {
+                    agent_id: "devin-desktop".into(),
+                    connected: true,
+                },
+                ConnectionChange {
+                    agent_id: "devin".into(),
+                    connected: false,
+                },
+            ])
+            .is_err());
+        let applied = manager.apply_confirmed(&selection, true).unwrap();
+        assert_eq!(applied.changed, vec!["devin-desktop"]);
+        let preserved = PathBuf::from(applied.preserved_backup_dir.unwrap())
+            .join("00-devin-desktop/global_rules.md");
+        assert_eq!(
+            fs::read_to_string(preserved).unwrap(),
+            "personal Devin rules"
+        );
+        let new_link = fs::read_link(&native).unwrap();
+        assert_eq!(manager.plan(&["devin".into()]).unwrap().change_count, 0);
+        assert_eq!(fs::read_link(&legacy).unwrap(), legacy_link);
+        assert_eq!(
+            fs::read_to_string(&fallback).unwrap(),
+            "legacy imported rules"
+        );
+
+        // Recovery must not overwrite edits made after the new connection.
+        fs::remove_file(&native).unwrap();
+        fs::write(&native, "edited after connecting").unwrap();
+        assert!(matches!(
+            manager.rollback_latest(),
+            Err(ArmError::RollbackDrift(_))
+        ));
+        assert_eq!(
+            fs::read_to_string(&native).unwrap(),
+            "edited after connecting"
+        );
+        fs::remove_file(&native).unwrap();
+        create_symlink(&new_link, &native).unwrap();
+        manager.rollback_latest().unwrap();
+        assert_eq!(fs::read_to_string(&native).unwrap(), "personal Devin rules");
+        assert!(!native.is_symlink());
+        assert_eq!(fs::read_link(&legacy).unwrap(), legacy_link);
+        manager.rollback_latest().unwrap();
+        assert!(!legacy.exists());
+        assert_eq!(
+            fs::read_to_string(&fallback).unwrap(),
+            "legacy imported rules"
+        );
+    }
+
+    #[test]
+    fn devin_desktop_detects_new_and_legacy_installations_without_writing_rules() {
+        for marker in [
+            ".devin",
+            ".config/devin",
+            "Applications/Devin.app",
+            ".local/bin/devin-desktop",
+            ".codeium/windsurf/bin/devin-desktop",
+            ".codeium/windsurf",
+            "Applications/Windsurf.app",
+            ".local/bin/windsurf",
+            ".local/bin/surf",
+        ] {
+            let (_root, mut manager, home) = fixture();
+            // Keep the test independent of applications and commands on this machine.
+            for adapter in &mut manager.adapters {
+                adapter
+                    .detection_paths
+                    .retain(|path| path.starts_with(&home));
+                adapter.command_names.clear();
+            }
+            let marker = home.join(marker);
+            if marker.to_string_lossy().contains("/bin/") {
+                fs::create_dir_all(marker.parent().unwrap()).unwrap();
+                fs::write(&marker, "command marker").unwrap();
+            } else {
+                fs::create_dir_all(&marker).unwrap();
+            }
+            let snapshot = manager.snapshot().unwrap();
+            let devin = snapshot
+                .agents
+                .iter()
+                .find(|a| a.id == "devin-desktop")
+                .unwrap();
+            assert!(
+                devin.installed,
+                "missing detection for {}",
+                marker.display()
+            );
+            assert!(!devin.connected);
+            assert!(!home.join(".devin/global_rules.md").exists());
+        }
+    }
+
+    #[test]
+    fn extension_detection_supports_devin_and_windsurf_directories() {
+        for directory in [".devin/extensions", ".windsurf/extensions"] {
+            let (_root, manager, home) = fixture();
+            let extension = home.join(directory).join("continue.continue-1.0.0");
+            fs::create_dir_all(&extension).unwrap();
+            let project = home.join("project");
+            fs::create_dir(&project).unwrap();
+            let project_manager = manager.for_project(&home, &project).unwrap();
+            let snapshot = project_manager.snapshot().unwrap();
+            let agent = snapshot.agents.iter().find(|a| a.id == "continue").unwrap();
+            assert!(agent.installed);
+            assert!(agent
+                .detection_detail
+                .contains(&extension.display().to_string()));
+            assert!(!project.join(".continue").exists());
+        }
+    }
+
+    #[test]
+    fn cascade_limit_does_not_block_devin_desktop_and_allows_legacy_disconnect() {
         let (_root, manager, _home) = fixture();
         manager.initialize().unwrap();
         manager.apply(&["windsurf".into()]).unwrap();
@@ -1796,6 +2158,9 @@ mod tests {
         )
         .unwrap();
         manager.activate_profile("default").unwrap();
+        let devin_plan = manager.plan(&["devin-desktop".into()]).unwrap();
+        assert!(!devin_plan.blocked);
+        assert_eq!(devin_plan.change_count, 1);
         let plan = manager.plan(&["windsurf".into()]).unwrap();
         assert!(plan.blocked);
         assert!(plan.steps[0].summary.contains("6000"));
