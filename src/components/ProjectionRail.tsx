@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { agentNote } from "../lib/agentCatalog";
+import { agentNote, agentWarning } from "../lib/agentCatalog";
 import type { AgentStatus, ProjectionPlan, RuntimeState } from "../lib/types";
 import { useI18n } from "../lib/i18n";
 import { ConfirmDialog } from "./ConfirmDialog";
@@ -179,7 +179,7 @@ export function ProjectionRail({
               <code className="agent-card-path" title={agent.targetPath}>{agent.targetPath}</code>
               {pending && <small className="agent-card-pending">{zh ? "待保存" : "Unsaved"} · {desiredConnected ? t("projection.joined") : t("projection.independent")}</small>}
               {(agent.warning || agent.state === "conflict") && <small className="agent-card-warning">{agent.warning
-                ? zh ? `规则超过 ${agent.maxChars?.toLocaleString()} 字符限制，请精简 Profile。` : agent.warning
+                ? agentWarning(agent, zh)
                 : targetDetail(agent)}</small>}
               {step && step.action !== "none" && <small className="agent-card-pending">{stepSummary(step.action)}</small>}
               <div className="agent-card-footer">

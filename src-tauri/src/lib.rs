@@ -7,6 +7,49 @@ use tauri::{AppHandle, Manager};
 
 mod open_targets;
 
+#[tauri::command]
+fn get_git_sync_config(
+    app: AppHandle,
+    library_root: Option<String>,
+) -> Result<Option<arm_core::GitSyncConfig>, String> {
+    build_manager(&app, library_root)?
+        .git_sync_config()
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn preview_git_sync(
+    app: AppHandle,
+    library_root: Option<String>,
+    request: arm_core::GitSyncRequest,
+) -> Result<arm_core::GitSyncPlan, String> {
+    let manager = build_manager(&app, library_root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        manager
+            .preview_git_sync(&request)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+async fn apply_git_sync(
+    app: AppHandle,
+    library_root: Option<String>,
+    request: arm_core::GitSyncRequest,
+    token: String,
+) -> Result<arm_core::GitSyncOutcome, String> {
+    let manager = build_manager(&app, library_root)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        manager
+            .apply_git_sync(&request, &token)
+            .map_err(|e| e.to_string())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 fn build_manager(app: &AppHandle, library_root: Option<String>) -> Result<RulesManager, String> {
     let root = match library_root {
         Some(root) => PathBuf::from(root),
@@ -239,6 +282,9 @@ pub fn run() {
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
+            get_git_sync_config,
+            preview_git_sync,
+            apply_git_sync,
             get_workspace_snapshot,
             get_operation_history,
             preview_restore_history,

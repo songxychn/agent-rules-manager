@@ -23,6 +23,7 @@ pub struct AgentAdapter {
     pub scope: String,
     pub docs_url: String,
     pub max_chars: Option<usize>,
+    pub max_bytes: Option<usize>,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -63,6 +64,7 @@ pub struct AgentStatus {
     pub note: String,
     pub docs_url: String,
     pub max_chars: Option<usize>,
+    pub max_bytes: Option<usize>,
     pub detail: String,
 }
 

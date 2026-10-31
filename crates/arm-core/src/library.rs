@@ -9,6 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Component, Path, PathBuf};
 
+pub(crate) mod git_sync;
+
 const LIBRARY_SCHEMA_VERSION: u32 = 3;
 const MULTI_FILE_SCHEMA_VERSION: u32 = 2;
 const LEGACY_LIBRARY_SCHEMA_VERSION: u32 = 1;

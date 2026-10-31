@@ -12,10 +12,11 @@
     ],
     "apps": [],
     "aliases": [],
-    "note": "",
-    "docsUrl": "",
+    "note": "Claude Code user instructions. Cowork sessions skip global symlinks that point outside the working directory.",
+    "docsUrl": "https://code.claude.com/docs/en/memory",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "Claude Code 的用户规则。Cowork 会话不会读取指向工作区外的全局软链接。",
+    "maxBytes": null
   },
   {
     "id": "codex",
@@ -29,32 +30,38 @@
       ".codex"
     ],
     "apps": [
-      "Codex",
-      "ChatGPT"
+      "Codex"
     ],
     "aliases": [],
-    "note": "",
-    "docsUrl": "",
+    "note": "Codex user instructions. A non-empty AGENTS.override.md in CODEX_HOME replaces this file.",
+    "docsUrl": "https://learn.chatgpt.com/docs/agent-configuration/agents-md",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "Codex 的用户规则。CODEX_HOME 中非空的 AGENTS.override.md 会替代此文件。",
+    "maxBytes": null
   },
   {
     "id": "grok",
-    "label": "Grok",
+    "label": "Grok Build",
     "scope": "global",
     "path": ".grok/AGENTS.md",
     "commands": [
-      "grok"
+      "grok",
+      "grok-build"
     ],
     "markers": [
-      ".grok"
+      ".grok",
+      ".grok/bin/grok",
+      ".grok/bin/grok-build"
     ],
     "apps": [],
-    "aliases": [],
-    "note": "",
-    "docsUrl": "",
+    "aliases": [
+      "grok-build"
+    ],
+    "note": "Official Grok Build coding agent; not Grok web chat or third-party Grok CLI tools. Current documentation specifies no file-size cap.",
+    "docsUrl": "https://docs.x.ai/build/features/project-rules",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "官方 Grok Build 编程 Agent，不是 Grok 网页聊天或第三方 Grok CLI。当前官方文档已取消规则文件大小上限。",
+    "maxBytes": null
   },
   {
     "id": "opencode",
@@ -73,9 +80,10 @@
     ],
     "aliases": [],
     "note": "",
-    "docsUrl": "",
+    "docsUrl": "https://opencode.ai/docs/rules/",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "",
+    "maxBytes": null
   },
   {
     "id": "qwen",
@@ -91,9 +99,10 @@
     "apps": [],
     "aliases": [],
     "note": "",
-    "docsUrl": "",
+    "docsUrl": "https://qwenlm.github.io/qwen-code-docs/en/users/features/memory/",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "",
+    "maxBytes": null
   },
   {
     "id": "gemini",
@@ -108,10 +117,11 @@
     ],
     "apps": [],
     "aliases": [],
-    "note": "",
+    "note": "Default Gemini CLI context file. A custom context.fileName setting can change the filename the client reads.",
     "docsUrl": "https://geminicli.com/docs/cli/gemini-md/",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "Gemini CLI 默认规则文件；客户端的 context.fileName 设置可能改用其他文件名。",
+    "maxBytes": null
   },
   {
     "id": "antigravity",
@@ -122,7 +132,8 @@
       "antigravity"
     ],
     "markers": [
-      ".gemini/antigravity"
+      ".gemini/antigravity",
+      ".gemini/antigravity-cli"
     ],
     "apps": [
       "Antigravity"
@@ -130,10 +141,11 @@
     "aliases": [
       "ag"
     ],
-    "note": "Antigravity: 12,000 characters per rule file.",
-    "docsUrl": "https://antigravity.google/docs/rules-workflows",
-    "maxChars": 12000,
-    "noteZh": "Antigravity 每个规则文件最多 12,000 字符；默认与 Gemini CLI 共用同一文件。"
+    "note": "Antigravity: 24,000 UTF-8 bytes per file after expanding includes; active rules also share a 20,000-token budget. Shares the default file with Gemini CLI.",
+    "docsUrl": "https://antigravity.google/docs/rules",
+    "maxChars": null,
+    "noteZh": "Antigravity 单文件上限为 24,000 字节（UTF-8，含展开的引用）；活跃规则另共用 20,000 token 预算。默认与 Gemini CLI 共用同一文件。",
+    "maxBytes": 24000
   },
   {
     "id": "copilot",
@@ -153,11 +165,41 @@
     "note": "",
     "docsUrl": "https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "",
+    "maxBytes": null
+  },
+  {
+    "id": "devin-desktop",
+    "label": "Devin Desktop（原 Windsurf）",
+    "scope": "global",
+    "path": ".devin/global_rules.md",
+    "commands": [
+      "devin-desktop",
+      "windsurf",
+      "surf"
+    ],
+    "markers": [
+      ".devin",
+      ".config/devin",
+      ".codeium/windsurf",
+      "Library/Application Support/Devin"
+    ],
+    "apps": [
+      "Devin",
+      "Windsurf"
+    ],
+    "aliases": [
+      "devin"
+    ],
+    "note": "Devin Local global rules, also read by Devin CLI. Overrides ~/.windsurf/global_rules.md; other legacy rule files remain untouched. For Cascade, use the old Windsurf entry.",
+    "docsUrl": "https://docs.devin.ai/desktop/devin-local/customizations#rule-files",
+    "maxChars": null,
+    "noteZh": "Devin Local 全局规则，Devin CLI 也会读取。优先于 ~/.windsurf/global_rules.md；其他旧规则文件保持原样。Cascade 请使用 Windsurf 旧版入口。",
+    "maxBytes": null
   },
   {
     "id": "windsurf",
-    "label": "Windsurf / Cascade",
+    "label": "Windsurf 旧版（Cascade）",
     "scope": "global",
     "path": ".codeium/windsurf/memories/global_rules.md",
     "commands": [
@@ -170,14 +212,38 @@
       "Windsurf"
     ],
     "aliases": [],
-    "note": "Cascade global rules: 6,000 characters. Does not configure the Devin Local agent.",
+    "note": "Global rules for Cascade in older Windsurf versions (6,000-character limit). Existing connections are preserved. For Devin Local after upgrading, use the Devin Desktop entry.",
     "docsUrl": "https://docs.devin.ai/desktop/cascade/memories",
     "maxChars": 6000,
-    "noteZh": "Cascade 全局规则最多 6,000 字符；此入口不配置 Devin Local Agent。"
+    "noteZh": "旧版 Windsurf 中 Cascade 的全局规则（最多 6,000 字符）。已有连接继续保留；升级后的 Devin Local 请使用 Devin Desktop 入口。",
+    "maxBytes": null
+  },
+  {
+    "id": "cline-global",
+    "label": "Cline（当前版本）",
+    "scope": "global",
+    "path": ".cline/rules/agent-rules.md",
+    "commands": [
+      "cline"
+    ],
+    "markers": [
+      ".cline"
+    ],
+    "apps": [
+      "Cline"
+    ],
+    "aliases": [
+      "cline-current"
+    ],
+    "note": "Global rules shared by current Cline IDE, Desktop and CLI clients. CLINE_DIR overrides the configuration root. Choose one global entry to avoid duplicate rule loading.",
+    "docsUrl": "https://docs.cline.bot/getting-started/config",
+    "maxChars": null,
+    "maxBytes": null,
+    "noteZh": "当前 Cline 编辑器扩展、桌面版和 CLI 共用的全局规则。支持 CLINE_DIR 覆盖配置目录；选择一个全局入口即可，避免重复加载。"
   },
   {
     "id": "cline",
-    "label": "Cline (VS Code)",
+    "label": "Cline（Documents 规则目录）",
     "scope": "global",
     "path": "Documents/Cline/Rules/agent-rules.md",
     "commands": [],
@@ -186,14 +252,15 @@
     ],
     "apps": [],
     "aliases": [],
-    "note": "",
+    "note": "Additional global rules directory still read by current Cline clients. Prefer the current-version entry for new connections; enabling both can load duplicate rules.",
     "docsUrl": "https://docs.cline.bot/customization/cline-rules",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "当前 Cline 仍会读取的补充全局规则目录。新接入建议选择“Cline（当前版本）”；同时启用两处可能重复加载规则。",
+    "maxBytes": null
   },
   {
     "id": "cline-cli",
-    "label": "Cline CLI",
+    "label": "Cline CLI 旧版（独立规则目录）",
     "scope": "global",
     "path": ".cline/data/settings/rules/agent-rules.md",
     "commands": [
@@ -204,14 +271,15 @@
     ],
     "apps": [],
     "aliases": [],
-    "note": "",
+    "note": "Preserves existing connections to the older CLI data/settings/rules directory. Current Cline uses rules directly under its configuration directory; use the current-version entry.",
     "docsUrl": "https://docs.cline.bot/cli/cli-reference",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "保留旧 CLI 在 data/settings/rules 下的规则连接。当前 Cline 改为读取配置目录下的 rules，请使用“Cline（当前版本）”。",
+    "maxBytes": null
   },
   {
     "id": "roo",
-    "label": "Roo Code",
+    "label": "Roo Code（已停止维护）",
     "scope": "global",
     "path": ".roo/rules/agent-rules.md",
     "commands": [],
@@ -222,14 +290,15 @@
     "aliases": [
       "roo-code"
     ],
-    "note": "",
+    "note": "The original Roo Code extension shut down on May 15, 2026. This entry preserves its existing rules; it does not configure Roomote or the ZooCode fork.",
     "docsUrl": "https://github.com/RooCodeInc/Roo-Code/blob/main/apps/docs/docs/features/custom-instructions.md",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "原 Roo Code 扩展已于 2026 年 5 月 15 日停止维护。此入口保留原有规则，不配置 Roomote 或 ZooCode 分支。",
+    "maxBytes": null
   },
   {
     "id": "kilo",
-    "label": "Kilo Code (legacy extension)",
+    "label": "Kilo Code（旧版 VS Code 扩展）",
     "scope": "global",
     "path": ".kilocode/rules/agent-rules.md",
     "commands": [],
@@ -240,14 +309,15 @@
     "aliases": [
       "kilocode"
     ],
-    "note": "Legacy VS Code extension rules; not the new Kilo CLI.",
+    "note": "Rules for the older Kilo Code VS Code extension. Current Kilo clients use instructions in kilo.jsonc; this entry does not configure the new CLI.",
     "docsUrl": "https://github.com/Kilo-Org/kilocode-legacy/blob/main/docs/legacy-ides/customize/custom-rules.md",
     "maxChars": null,
-    "noteZh": "适用于旧版 VS Code 扩展，不适用于新版 Kilo CLI。"
+    "noteZh": "旧版 Kilo Code VS Code 扩展的规则。当前 Kilo 客户端通过 kilo.jsonc 的 instructions 配置规则；此入口不配置新版 CLI。",
+    "maxBytes": null
   },
   {
     "id": "kiro",
-    "label": "Kiro",
+    "label": "Kiro（IDE / CLI）",
     "scope": "global",
     "path": ".kiro/steering/agent-rules.md",
     "commands": [
@@ -261,10 +331,11 @@
       "Kiro"
     ],
     "aliases": [],
-    "note": "",
+    "note": "Global steering for the local IDE and CLI. Custom agents must explicitly include steering files in their resources configuration.",
     "docsUrl": "https://kiro.dev/docs/steering/",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "适用于本机 IDE 和 CLI 的全局 Steering。自定义 Agent 需要在 resources 中显式引用这些文件。",
+    "maxBytes": null
   },
   {
     "id": "cursor",
@@ -285,7 +356,8 @@
     "note": "Project AGENTS.md. Global User Rules remain in Cursor Settings.",
     "docsUrl": "https://cursor.com/docs/context/rules",
     "maxChars": null,
-    "noteZh": "使用项目根 AGENTS.md；全局 User Rules 仍在 Cursor 设置中管理。"
+    "noteZh": "使用项目根 AGENTS.md；全局 User Rules 仍在 Cursor 设置中管理。",
+    "maxBytes": null
   },
   {
     "id": "copilot-ide",
@@ -299,7 +371,8 @@
     "note": "Repository instructions; IDE support depends on the Copilot client.",
     "docsUrl": "https://docs.github.com/en/copilot/reference/custom-instructions-support",
     "maxChars": null,
-    "noteZh": "使用仓库级说明文件；支持范围取决于 Copilot 客户端。"
+    "noteZh": "使用仓库级说明文件；支持范围取决于 Copilot 客户端。",
+    "maxBytes": null
   },
   {
     "id": "continue",
@@ -317,7 +390,8 @@
     "note": "",
     "docsUrl": "https://docs.continue.dev/customize/deep-dives/rules",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "",
+    "maxBytes": null
   },
   {
     "id": "amp",
@@ -335,7 +409,8 @@
     "note": "",
     "docsUrl": "https://ampcode.com/docs/customize/agents-md",
     "maxChars": null,
-    "noteZh": ""
+    "noteZh": "",
+    "maxBytes": null
   },
   {
     "id": "droid",
@@ -353,13 +428,14 @@
       "factory"
     ],
     "note": "The total initial guideline budget is 80,000 characters, shared with other instruction files.",
-    "docsUrl": "https://docs.factory.ai/harness/agents-md",
+    "docsUrl": "https://docs.factory.com/harness/agents-md",
     "maxChars": 80000,
-    "noteZh": "启动时的说明文件共用 80,000 字符预算，其他文件也占用该预算。"
+    "noteZh": "启动时的说明文件共用 80,000 字符预算，其他文件也占用该预算。",
+    "maxBytes": null
   },
   {
     "id": "augment",
-    "label": "Augment / Auggie",
+    "label": "Augment Code / Auggie",
     "scope": "global",
     "path": ".augment/rules/agent-rules.md",
     "commands": [
@@ -372,14 +448,15 @@
     "aliases": [
       "auggie"
     ],
-    "note": "User rules share a 24,576-character budget with other user rules.",
-    "docsUrl": "https://docs.augmentcode.com/setup-augment/guidelines",
-    "maxChars": 24576,
-    "noteZh": "用户规则共用 24,576 字符预算，其他用户规则也占用该预算。"
+    "note": "User rules read by Auggie CLI and Augment IDE extensions. IDE User Guidelines are a separate setting/file; their 24,576-character limit does not describe this rules directory.",
+    "docsUrl": "https://docs.augmentcode.com/cli/rules",
+    "maxChars": null,
+    "noteZh": "Auggie CLI 与 Augment 编辑器扩展读取的用户规则。IDE User Guidelines 是另一项设置和文件，其 24,576 字符限制不代表此规则目录的上限。",
+    "maxBytes": null
   },
   {
     "id": "zed",
-    "label": "Zed Agent",
+    "label": "Zed Agent（macOS / Linux）",
     "scope": "global",
     "path": ".config/zed/AGENTS.md",
     "commands": [
@@ -392,14 +469,33 @@
       "Zed"
     ],
     "aliases": [],
-    "note": "Zed native Agent only; external agents and terminal threads use their own instructions.",
+    "note": "Native Zed Agent rules on macOS/Linux. On Windows this entry preserves the older tool path; use Zed Agent (Windows) for native rules. External agents and terminal threads use their own instructions.",
     "docsUrl": "https://zed.dev/docs/ai/instructions",
     "maxChars": null,
-    "noteZh": "仅用于 Zed 原生 Agent；外部 Agent 和终端使用各自的规则入口。"
+    "noteZh": "macOS/Linux 的 Zed 原生规则。Windows 上此入口仅保留旧工具路径；原生规则请选择“Zed Agent（Windows）”。外部 Agent 和终端使用各自的规则入口。",
+    "maxBytes": null
+  },
+  {
+    "id": "zed-windows",
+    "label": "Zed Agent（Windows）",
+    "scope": "global",
+    "platform": "windows",
+    "path": "AppData/Roaming/Zed/AGENTS.md",
+    "commands": [
+      "zed"
+    ],
+    "markers": [],
+    "apps": [],
+    "aliases": [],
+    "note": "Native Zed Agent rules at %APPDATA%/Zed/AGENTS.md. Falls back to ~/AppData/Roaming/Zed/AGENTS.md when APPDATA is missing or invalid. Connect separately from the older .config path; existing files require confirmed backup takeover.",
+    "docsUrl": "https://zed.dev/docs/ai/instructions",
+    "maxChars": null,
+    "noteZh": "Windows 原生 Zed Agent 规则，位于 %APPDATA%/Zed/AGENTS.md。APPDATA 缺失或无效时使用 ~/AppData/Roaming/Zed/AGENTS.md。与旧 .config 路径单独接入；已有文件须确认备份接管。",
+    "maxBytes": null
   },
   {
     "id": "junie",
-    "label": "Junie",
+    "label": "Junie（JetBrains 插件）",
     "scope": "project",
     "path": ".junie/AGENTS.md",
     "commands": [
@@ -410,9 +506,10 @@
     ],
     "apps": [],
     "aliases": [],
-    "note": "Current Junie uses .junie/AGENTS.md exclusively when present; a custom Guidelines path takes precedence.",
+    "note": "JetBrains plugin rules. When .junie/AGENTS.md exists it replaces the default root rules and playbook/rules combination; a custom Guidelines path takes precedence.",
     "docsUrl": "https://junie.jetbrains.com/docs/junie-plugin-project-settings.html",
     "maxChars": null,
-    "noteZh": "当前 Junie 优先只读取 .junie/AGENTS.md；自定义 Guidelines 路径优先于此默认路径。"
+    "noteZh": "JetBrains 插件的项目规则。存在 .junie/AGENTS.md 时，不再组合读取根 AGENTS.md、playbook 和 rules；自定义 Guidelines path 优先。",
+    "maxBytes": null
   }
 ]

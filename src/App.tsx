@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { AppIcon, BrandMark } from "./components/AppIcon";
 import { LibrarySetupPanel } from "./components/LibrarySetupPanel";
 import { HistoryPage } from "./components/HistoryPage";
+import { GitSyncPage } from "./components/GitSyncPage";
 import { ProfilesPage } from "./components/ProfilesPage";
 import { AgentScopePanel } from "./components/AgentScopePanel";
 import { ProjectionRail } from "./components/ProjectionRail";
@@ -22,7 +23,7 @@ import type {
 } from "./lib/types";
 import "./styles.css";
 
-type View = "control" | "profiles" | "history" | "settings";
+type View = "control" | "profiles" | "history" | "settings" | "sync";
 
 function workspaceFingerprint(snapshot: WorkspaceSnapshot | undefined): string {
   if (!snapshot) return "";
@@ -323,6 +324,7 @@ function App() {
         : undefined;
 
   const renderReadyView = () => {
+    if (view === "sync") return <GitSyncPage key={libraryRoot} libraryRoot={libraryRoot} onSynced={() => loadSnapshot(libraryRoot)} onProfiles={() => setView("profiles")} />;
     if (view === "history") return <HistoryPage key={libraryRoot} libraryRoot={libraryRoot} onRestored={() => loadSnapshot(libraryRoot)} />;
     if (view === "settings") return <SettingsPage />;
     if (view === "profiles") {
@@ -415,7 +417,7 @@ function App() {
         </div>
 
         <div className="nav-primary">
-          {(["control", "profiles", "history"] as const).map((item) => (
+          {(["control", "profiles", "sync", "history"] as const).map((item) => (
             <button
               className={`nav-item ${view === item ? "is-active" : ""}`}
               aria-current={view === item ? "page" : undefined}
@@ -493,7 +495,7 @@ function App() {
         </header>
 
         <main className="workspace">
-          {snapshot.libraryState !== "ready" && view !== "settings" && view !== "history" ? (
+          {snapshot.libraryState !== "ready" && view !== "settings" && view !== "history" && view !== "sync" ? (
             <LibrarySetupPanel
               state={snapshot.libraryState}
               detail={snapshot.libraryDetail}
