@@ -1,9 +1,9 @@
 import catalog from "./agentCatalog.json";
 import type { AgentStatus } from "./types";
 
-export function demoAgents(scope: "global" | "project", root: string, platform = "macos"): AgentStatus[] {
+export function demoAgents(root: string, platform = "macos"): AgentStatus[] {
   const agents: AgentStatus[] = [];
-  for (const definition of catalog.filter((agent) => agent.scope === scope && (!agent.platform || agent.platform === platform))) {
+  for (const definition of catalog.filter((agent) => !agent.platform || agent.platform === platform)) {
     const targetPath = `${root}/${definition.path}`;
     const shared = agents.find((agent) => agent.targetPath === targetPath);
     if (shared) {
@@ -15,9 +15,9 @@ export function demoAgents(scope: "global" | "project", root: string, platform =
       continue;
     }
     agents.push({
-      id: definition.id, label: definition.label, targetPath, scope,
+      id: definition.id, label: definition.label, targetPath,
       mode: "symlink", state: "ready", targetKind: "missing",
-      installed: ["gemini", "copilot", "devin-desktop", "cursor", "copilot-ide"].includes(definition.id),
+      installed: ["gemini", "copilot", "devin-desktop"].includes(definition.id),
       connected: false, detectionDetail: "Browser demo installation marker.",
       detail: "No native rules file exists yet.", note: definition.note,
       docsUrl: definition.docsUrl, maxChars: definition.maxChars ?? undefined,

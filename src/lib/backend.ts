@@ -127,32 +127,22 @@ let demoSnapshot: WorkspaceSnapshot = {
     },
   ],
 };
-demoSnapshot.agents = demoAgents("global", "/Users/demo").map((agent) => ({
+demoSnapshot.agents = demoAgents("/Users/demo").map((agent) => ({
   ...agent, ...demoSnapshot.agents.find((existing) => existing.id === agent.id),
 }));
-const demoProjects = new Map<string, WorkspaceSnapshot["agents"]>();
-function scopedDemo(projectRoot?: string): WorkspaceSnapshot {
-  if (!projectRoot) return demoSnapshot;
-  if (!projectRoot.startsWith("/") || projectRoot.split("/").includes("..")) {
-    throw new Error("Enter an absolute project directory without '..'.");
-  }
-  if (!demoProjects.has(projectRoot)) demoProjects.set(projectRoot, demoAgents("project", projectRoot));
-  return { ...demoSnapshot, agents: demoProjects.get(projectRoot)! };
-}
-let demoRollbackProject: string | undefined;
 let demoRollbackSnapshot: WorkspaceSnapshot | undefined;
 let demoLibraryRollbackSnapshot: WorkspaceSnapshot | undefined;
 let demoLibraryRollbackPaths: string[] | undefined;
 let demoLibraryRollbackId: string | undefined;
 
-type DemoPoint = { record: HistoryRecord; snapshot: WorkspaceSnapshot; projects: [string, WorkspaceSnapshot["agents"]][]; sync: DemoSyncState };
+type DemoPoint = { record: HistoryRecord; snapshot: WorkspaceSnapshot; sync: DemoSyncState };
 const demoHistory: DemoPoint[] = [];
 let demoHistorySequence = 0;
 function recordDemo(operation: string, subjects: string[], paths: string[], scope: HistoryRecord["scope"] = "profiles") {
   const record: HistoryRecord = {
     id: `demo-history-${++demoHistorySequence}`, createdAt: new Date().toISOString(), operation, subjects, paths, scope, restorable: true,
   };
-  demoHistory.push({ record, snapshot: structuredClone(demoSnapshot), projects: structuredClone([...demoProjects]), sync: structuredClone(demoSyncState) });
+  demoHistory.push({ record, snapshot: structuredClone(demoSnapshot), sync: structuredClone(demoSyncState) });
 }
 // Explicit browser-only sample history; no native files are inspected or changed.
 const demoInitial = structuredClone(demoSnapshot);
@@ -204,9 +194,7 @@ function demoRestorePlan(targetId: string): RestorePlan {
     }
   };
   compareAgents(demoSnapshot.agents, target.snapshot.agents);
-  const beforeProjects = new Map(demoProjects), afterProjects = new Map(target.projects);
-  for (const root of new Set([...beforeProjects.keys(), ...afterProjects.keys()])) compareAgents(beforeProjects.get(root) ?? [], afterProjects.get(root) ?? []);
-  return { target: structuredClone(target.record), token: JSON.stringify([demoHistory.map((p) => p.record.id), demoSnapshot, [...demoProjects], demoSyncState]),
+  return { target: structuredClone(target.record), token: JSON.stringify([demoHistory.map((p) => p.record.id), demoSnapshot, demoSyncState]),
     operations: demoHistory.slice(index + 1).map((p) => structuredClone(p.record)).reverse(), steps, conflicts: [], blocked: false };
 }
 
@@ -268,14 +256,12 @@ export const backend = {
     const target = demoHistory.find((p) => p.record.id === targetId)!;
     demoSnapshot = structuredClone(target.snapshot);
     demoSyncState = structuredClone(target.sync);
-    demoProjects.clear();
-    for (const [root, agents] of structuredClone(target.projects)) demoProjects.set(root, agents);
     recordDemo("restoreHistory", [target.record.createdAt], plan.steps.map((s) => s.path), "recovery");
     return { restored: plan.steps.map((s) => s.path), backupId: demoHistory.at(-1)!.record.id };
   },
-  async snapshot(libraryRoot?: string, projectRoot?: string): Promise<WorkspaceSnapshot> {
-    if (isTauri) return invoke("get_workspace_snapshot", { libraryRoot, projectRoot });
-    return structuredClone(scopedDemo(projectRoot));
+  async snapshot(libraryRoot?: string): Promise<WorkspaceSnapshot> {
+    if (isTauri) return invoke("get_workspace_snapshot", { libraryRoot });
+    return structuredClone(demoSnapshot);
   },
   async previewInitialize(libraryRoot?: string): Promise<LibraryPlan> {
     if (isTauri) return invoke("preview_initialize", { libraryRoot });
@@ -431,11 +417,11 @@ export const backend = {
     recordDemo("activateProfile", [profile.name], [`${demoRoot}/current`, "<local state>/machine.json"]);
     return mutation([`${demoRoot}/current`, "<local state>/machine.json"]);
   },
-  async preview(changes: ConnectionChange[], libraryRoot?: string, projectRoot?: string): Promise<ProjectionPlan> {
+  async preview(changes: ConnectionChange[], libraryRoot?: string): Promise<ProjectionPlan> {
     if (isTauri) {
-      return invoke("preview_apply", { changes, libraryRoot, projectRoot });
+      return invoke("preview_apply", { changes, libraryRoot });
     }
-    return buildProjectionPlan(scopedDemo(projectRoot), changes);
+    return buildProjectionPlan(demoSnapshot, changes);
   },
   async openTargets(): Promise<OpenTarget[]> {
     if (isTauri) return invoke("get_open_targets");
@@ -457,12 +443,11 @@ export const backend = {
     changes: ConnectionChange[],
     confirmExistingFiles: boolean,
     libraryRoot?: string,
-    projectRoot?: string,
   ): Promise<ApplyOutcome> {
     if (isTauri) {
-      return invoke("apply_rules", { changes, confirmExistingFiles, libraryRoot, projectRoot });
+      return invoke("apply_rules", { changes, confirmExistingFiles, libraryRoot });
     }
-    const current = scopedDemo(projectRoot);
+    const current = demoSnapshot;
     const preview = buildProjectionPlan(current, changes);
     if (preview.blocked) throw new Error("Projection is blocked.");
     const requested = new Map(changes.map((change) => [change.agentId, change.connected]));
@@ -506,9 +491,7 @@ export const backend = {
     };
     if (changed.length) {
       demoRollbackSnapshot = before;
-      demoRollbackProject = projectRoot;
-      if (projectRoot) demoProjects.set(projectRoot, next.agents);
-      else demoSnapshot.agents = next.agents;
+      demoSnapshot.agents = next.agents;
       demoSnapshot.latestBackup = "demo-apply-snapshot";
       recordDemo("connectionChange", next.agents.filter((a) => changed.includes(a.id)).map((a) => `${a.connected ? "connect" : "disconnect"}:${a.label}`), next.agents.filter((a) => changed.includes(a.id)).map((a) => a.targetPath), "agents");
     }
@@ -525,12 +508,10 @@ export const backend = {
       return invoke("rollback_latest", { libraryRoot });
     }
     if (!demoRollbackSnapshot) throw new Error("No rollback snapshot is available");
-    const current = scopedDemo(demoRollbackProject);
+    const current = structuredClone(demoSnapshot);
     const originalAgents = demoRollbackSnapshot.agents;
-    if (demoRollbackProject) demoProjects.set(demoRollbackProject, originalAgents);
-    else demoSnapshot.agents = originalAgents;
+    demoSnapshot.agents = originalAgents;
     demoSnapshot.latestBackup = undefined;
-    demoRollbackProject = undefined;
     demoRollbackSnapshot = undefined;
     return {
       restored: current.agents

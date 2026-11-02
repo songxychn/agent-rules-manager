@@ -1,4 +1,5 @@
 use arm_core::{ConnectionChange, RulesManager};
+use sha2::{Digest, Sha256};
 use std::{fs, path::PathBuf};
 use tempfile::TempDir;
 
@@ -179,23 +180,46 @@ fn an_empty_directory_cleanup_can_itself_be_undone() {
     assert!(library.join("profiles/work").is_dir());
 }
 
+#[cfg(unix)]
 #[test]
-fn recovery_keeps_project_boundaries_for_subsequent_undo() {
-    let (temp, manager, _, _) = fixture();
+fn recovery_keeps_legacy_project_boundaries_for_subsequent_undo() {
+    let (temp, manager, _, state) = fixture();
     let root = temp.path().canonicalize().unwrap();
     let project = root.join("project");
     fs::create_dir_all(&project).unwrap();
     let target = manager.operation_history().unwrap()[0].id.clone();
-    let project_manager = manager.clone().for_project(&root, &project).unwrap();
-    project_manager
-        .apply_connections(&[ConnectionChange {
-            agent_id: "cursor".into(),
-            connected: true,
-        }])
-        .unwrap();
+    let native = project.join("AGENTS.md");
+    let source = manager.source_path().display().to_string();
+    std::os::unix::fs::symlink(&source, &native).unwrap();
+    let applied = serde_json::json!({ "kind": "symlink", "target": source });
+    let digest = format!(
+        "{:x}",
+        Sha256::digest(serde_json::to_vec(&applied).unwrap())
+    );
+    let id = chrono::Utc::now().format("%Y%m%dT%H%M%S%.9fZ").to_string();
+    fs::create_dir_all(state.join("backups")).unwrap();
+    fs::write(
+        state.join(format!("backups/{id}.json")),
+        serde_json::to_vec_pretty(&serde_json::json!({
+            "historyEpoch": "",
+            "subjects": ["connect:Cursor"],
+            "id": id,
+            "createdAt": chrono::Utc::now().to_rfc3339(),
+            "entries": [{
+                "targetPath": native.display().to_string(),
+                "original": { "kind": "missing" },
+                "appliedDigest": digest,
+                "projectRoot": project,
+            }],
+        }))
+        .unwrap(),
+    )
+    .unwrap();
     let latest = manager.operation_history().unwrap()[0].id.clone();
     let plan = manager.preview_restore(&target).unwrap();
+    assert!(!plan.blocked, "{:?}", plan.conflicts);
     manager.restore_history(&target, &plan.token).unwrap();
+    assert!(fs::symlink_metadata(&native).is_err());
     fs::remove_dir_all(&project).unwrap();
     let undo = manager.preview_restore(&latest).unwrap();
     assert!(undo.blocked);

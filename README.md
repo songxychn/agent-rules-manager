@@ -1,6 +1,6 @@
 # Agent Rules Manager
 
-Agent Rules Manager 是一个 local-first 的桌面应用与 CLI：用多个 **Profile** 管理不同场景的规则，并把当前机器选中的 Profile 安全投射到 Codex、Claude Code、Cursor、Antigravity、Copilot 等 coding agent。
+Agent Rules Manager 是一个 local-first 的桌面应用与 CLI：用多个 **Profile** 管理不同场景的规则，并把当前机器选中的 Profile 安全投射到 Codex、Claude Code、Antigravity、Copilot CLI、Devin Desktop 等 coding agent 的全局规则文件。
 
 规则正文仍由用户在 VS Code、Cursor、Typora 等工具中维护；本项目负责结构校验、规则生成、本机切换、Agent 检测、原生路径接入、变更预览以及带漂移保护的回滚。
 
@@ -104,7 +104,7 @@ profiles/work/AGENTS.md ── generate ── .runtime/work-<digest>/
 - `profile.json` 仅保存名称、说明等元数据，不再配置文件列表；
 - 渲染结果带 `<!-- Source: profiles/<profile>/AGENTS.md -->` 注释，便于定位来源。
 
-保存源文件不会自动更新已接入的 Agent。修改当前 Profile 的 `AGENTS.md` 后，需要预览并重新激活同一个 Profile，生成新的 Runtime；仅刷新界面或查询状态不会应用变更。所有已接入项目与全局目标都跟随本机当前 Profile，不支持每个项目独立选用 Profile。
+保存源文件不会自动更新已接入的 Agent。修改当前 Profile 的 `AGENTS.md` 后，需要预览并重新激活同一个 Profile，生成新的 Runtime；仅刷新界面或查询状态不会应用变更。所有已接入的 Agent 都跟随本机当前 Profile。
 
 ## 多机器同步边界
 
@@ -149,7 +149,7 @@ profiles/work/AGENTS.md ── generate ── .runtime/work-<digest>/
 
 ## Agent 接入
 
-客户端目录同时用于 Rust 适配器和浏览器演示，当前包含 25 个客户端入口（含旧版规则入口和 Windows 专用入口）。全局视图默认合并 Gemini CLI / Antigravity 的共享文件，macOS / Linux 显示 19 个目标，Windows 显示 20 个目标；项目视图显示 4 个目标。
+客户端目录同时用于 Rust 适配器和浏览器演示，当前包含 21 个全局客户端入口（含旧版规则入口和 Windows 专用入口）。默认合并 Gemini CLI / Antigravity 的共享文件，macOS / Linux 显示 19 个目标，Windows 显示 20 个目标。
 
 | Agent | 范围 | 默认原生路径（未注明时为 macOS / Linux） |
 | --- | --- | --- |
@@ -169,15 +169,11 @@ profiles/work/AGENTS.md ── generate ── .runtime/work-<digest>/
 | [Roo Code（已停止维护）](https://github.com/RooCodeInc/Roo-Code/blob/main/apps/docs/docs/features/custom-instructions.md) | 全局 | `~/.roo/rules/agent-rules.md` |
 | [Kilo Code（旧版 VS Code 扩展）](https://github.com/Kilo-Org/kilocode-legacy/blob/main/docs/legacy-ides/customize/custom-rules.md) | 全局 | `~/.kilocode/rules/agent-rules.md` |
 | [Kiro（IDE / CLI）](https://kiro.dev/docs/steering/) | 全局 | `~/.kiro/steering/agent-rules.md` |
-| [Cursor](https://cursor.com/docs/context/rules) | 项目 | `<project>/AGENTS.md` |
-| [GitHub Copilot (IDE)](https://docs.github.com/en/copilot/reference/custom-instructions-support) | 项目 | `<project>/.github/copilot-instructions.md` |
-| [Continue](https://docs.continue.dev/customize/deep-dives/rules) | 项目 | `<project>/.continue/rules/agent-rules.md` |
 | [Amp](https://ampcode.com/docs/customize/agents-md) | 全局 | `~/.config/amp/AGENTS.md` |
 | [Factory Droid](https://docs.factory.com/harness/agents-md) | 全局 | `~/.factory/AGENTS.md` |
 | [Augment Code / Auggie](https://docs.augmentcode.com/cli/rules) | 全局 | `~/.augment/rules/agent-rules.md` |
 | [Zed Agent（macOS / Linux）](https://zed.dev/docs/ai/instructions) | 全局 | `~/.config/zed/AGENTS.md` |
 | [Zed Agent（Windows）](https://zed.dev/docs/ai/instructions) | Windows 全局 | `%APPDATA%\Zed\AGENTS.md` |
-| [Junie（JetBrains 插件）](https://junie.jetbrains.com/docs/junie-plugin-project-settings.html) | 项目 | `<project>/.junie/AGENTS.md` |
 
 Adapter 只处理 Agent 协议差异；同步的 Profile 内容保持 CLI 和 Provider 中立。检测不会读取凭据、会话或登录状态。应用状态和备份位于平台应用数据目录，不放进规则库。
 
@@ -185,18 +181,16 @@ Adapter 只处理 Agent 协议差异；同步的 Profile 内容保持 CLI 和 Pr
 
 ### 范围、共享路径与模型服务
 
-- 桌面控制台默认显示全局规则；输入一个已存在的绝对项目目录并点击“查看项目”，管理 Cursor、Copilot IDE、Continue、Junie 的项目规则。CLI 使用 `--project /absolute/project`，不会隐式采用当前工作目录或自动创建项目。
-- Cursor 使用项目根 `AGENTS.md`，适用于官方支持该格式的版本；全局 User Rules 仍在 Cursor Settings 中管理。这个项目文件也可能被其他支持 AGENTS.md 的客户端读取。
+- 只管理各 Agent 的全局规则文件。项目范围（Cursor、Copilot IDE、Continue、Junie 的项目规则及 CLI `--project`）已移除；此前在项目中建立的链接不会被自动断开，需要时可在「操作历史」中恢复，或手动删除项目里的链接文件。旧备份仍按原项目目录做边界检查。
 - 默认 Gemini CLI 与 Antigravity 共用 `~/.gemini/GEMINI.md`，合并为一个开关；CLI 的 `gemini`、`antigravity`、`ag` 都可选择同一目标，不会重复写入，同一次请求中的相反操作会被拒绝。设置 `GEMINI_CLI_HOME` 后，Gemini 读取其下 `.gemini/GEMINI.md`，与 Antigravity 分开展示。
 - Devin Desktop（原 Windsurf）使用 `~/.devin/global_rules.md`，由 Devin Local 读取，Devin CLI 也支持该路径；CLI 选择器为 `devin-desktop`（别名 `devin`）。检测兼容 Devin/Windsurf 应用、`devin-desktop`/`windsurf`/`surf` 命令及新旧配置目录；扩展检测兼容 `.devin/extensions` 和 `.windsurf/extensions`。
 - 旧 `windsurf` ID 继续指向 Cascade 原有的 `~/.codeium/windsurf/memories/global_rules.md`，独立显示为“Windsurf 旧版（Cascade）”，保留已有连接、6,000 字符限制和回滚能力；不会自动改写、迁移或断开旧路径。启用 Devin Desktop 需要单独预览和确认；已有普通文件仍先确认接管并备份。
 - [Devin 官方规则说明](https://docs.devin.ai/desktop/devin-local/customizations#rule-files)也支持项目 `AGENTS.md`、`.devin/rules/*.md` 和旧 `.windsurf/rules/*.md`、`.windsurfrules`；本入口只管理上述单个全局文件。新旧 `global_rules.md` 同时存在时，Devin Local 优先读取 `.devin/global_rules.md`，旧 `.windsurf/global_rules.md` 保留原样。其他规则文件和导入设置不会被本工具修改，是否导入旧格式取决于客户端配置。
 - 支持绝对路径环境覆盖：`CODEX_HOME`、`CLAUDE_CONFIG_DIR`、`COPILOT_HOME`、`QWEN_HOME`、`GEMINI_CLI_HOME`、`CLINE_DIR`（Cline 当前版本）；OpenCode 按 `OPENCODE_CONFIG_DIR` → `XDG_CONFIG_HOME/opencode` → `~/.config/opencode` 选择。空值和相对路径不会被当成有效覆盖。
 - Cline 当前版本的扩展、桌面版和 CLI 共用 `~/.cline/rules/agent-rules.md`（`cline-global`，别名 `cline-current`），支持 `CLINE_DIR` 覆盖配置根目录。旧 `cline` ID 继续管理 Documents 补充目录（Linux 无 Documents 目录时为 `~/Cline/Rules`）；旧 `cline-cli` ID 继续管理原 data/settings/rules 目录，已有连接不会自动迁移。当前客户端也会读取 Documents 目录，选择一个全局入口即可，避免重复加载。
-- Kilo 项仅适配旧版 VS Code 扩展；当前 Kilo 通过 `kilo.jsonc` 的 `instructions` 配置加载文件，本工具不改写该配置。Zed 项仅适配原生 Agent。Junie 项明确针对 JetBrains 插件；自定义 Guidelines path 优先于默认路径，创建 `.junie/AGENTS.md` 也会改变其原有组合加载方式。Kiro 全局 Steering 用于本机 IDE / CLI，自定义 Agent 仍需在 `resources` 中引用。
+- Kilo 项仅适配旧版 VS Code 扩展；当前 Kilo 通过 `kilo.jsonc` 的 `instructions` 配置加载文件，本工具不改写该配置。Zed 项仅适配原生 Agent。Kiro 全局 Steering 用于本机 IDE / CLI，自定义 Agent 仍需在 `resources` 中引用。
 - Zed 的 Windows 原生入口为 `zed-windows`，读取绝对路径 `APPDATA` 下的 `Zed/AGENTS.md`；`APPDATA` 缺失、为空或为相对路径时，使用用户主目录下的 `AppData/Roaming/Zed/AGENTS.md`。该入口只在 Windows 出现。旧 `zed` ID 继续对应 `.config/zed/AGENTS.md`，保留已有文件、连接和历史备份；Windows 上旧入口只按旧目录检测，不因检测到 Zed 命令或应用就被视为可用。接入新入口需单独预览，已有文件仍须确认备份接管；不会自动复制、覆盖或断开旧规则。macOS / Linux 继续使用原路径。
 - 规则保持完整，不截断。有明确上限的客户端会按声明的字符数或 UTF-8 字节数在连接计划中阻止超长规则，并在状态中显示原因；切换 Profile 后已连接文件会立即跟随，若超限会在刷新状态时警告，需缩短 Profile。Antigravity 单文件上限为 24,000 字节（含展开引用），另有总 token 预算；Factory 的启动说明预算与其他文件共享。工具只检查本次渲染输出，无法计算客户端另行加载的文件和引用。Augment 的 IDE User Guidelines 与用户规则目录是不同入口，不把前者的 24,576 字符限制套到后者。
-- 项目链接依赖本机规则库，所有接入项目跟随本机当前 Profile；它不是每项目独立选 Profile 或可移植的团队文件导出。项目子目录中的软链接会阻止操作，回滚也检查目录边界与文件漂移。接入已有项目文件仍需明确确认备份接管。
 - [Ollama](https://docs.ollama.com/quickstart) 和 [Z.ai / GLM](https://docs.z.ai/devpack/overview) 通过实际客户端接入。例如 Ollama 配合 Claude Code、Codex、OpenCode；Z.ai 配合 Claude Code、Cline、OpenCode。规则由客户端读取，不创建虚构的 provider 规则路径，不修改模型配置、API Key 或登录状态。
 - 本目录是已核对原生入口的支持清单，不保证覆盖所有产品版本。需要启动参数、手动设置或特定插件才能读取规则的其他工具，不会被标记为自动接入。
 
@@ -216,13 +210,10 @@ Adapter 只处理 Agent 协议差异；同步的 Profile 内容保持 CLI 和 Pr
 | [Roo Code](https://github.com/RooCodeInc/Roo-Code#disclaimer) | 标为已停止维护，保留原 ID 和规则路径；不把 Roomote 或 ZooCode 当成同一个适配器。 |
 | [Kilo Code](https://kilo.ai/docs/customize/custom-rules) | 明确为旧版 VS Code 扩展；不声称现有目录会自动配置新版 CLI。 |
 | [Kiro](https://kiro.dev/docs/steering/#steering-with-custom-agents) | 保留全局 Steering；注明自定义 Agent 需要资源引用，本机规则不自动作用于 Web / Mobile。 |
-| [Cursor](https://cursor.com/docs/rules)、[Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions)、[Copilot IDE](https://docs.github.com/en/copilot/reference/custom-instructions-support) | 现有项目 / 全局范围正确；Cursor User Rules 仍由客户端设置管理，Copilot IDE 支持范围依客户端而定。 |
-| [Continue](https://docs.continue.dev/customize/deep-dives/rules)、[Amp](https://ampcode.com/docs/customize/agents-md)、[Factory Droid](https://docs.factory.com/harness/agents-md) | 现有项目 / 全局文件入口继续有效；Continue 当前解析器支持无 frontmatter 的 Markdown；Factory 的 80,000 字符为共享启动预算。 |
+| [Copilot CLI](https://docs.github.com/en/copilot/how-tos/copilot-cli/customize-copilot/add-custom-instructions) | 全局范围正确。 |
+| [Amp](https://ampcode.com/docs/customize/agents-md)、[Factory Droid](https://docs.factory.com/harness/agents-md) | 全局文件入口继续有效；Factory 的 80,000 字符为共享启动预算。 |
 | [Augment Code / Auggie](https://docs.augmentcode.com/cli/rules) | 保留用户规则目录；移除从 IDE User Guidelines 错套到用户规则的字符限制。 |
 | [Zed Agent](https://zed.dev/docs/ai/instructions) | 已增加 Windows 专用原生路径及 APPDATA 回退；旧 ID、路径和连接独立保留。测试注入 Windows 平台并覆盖预览、接管备份、断开、回滚和漂移保护；尚未在真实 Windows 上进行端到端加载验证。外部 Agent 和终端线程保持各自的说明入口。 |
-| [Junie](https://junie.jetbrains.com/docs/junie-plugin-project-settings.html) | 名称明确为 JetBrains 插件；保留项目默认路径，说明其对根规则、playbook / rules 和自定义路径的影响。 |
-
-Continue 的纯 Markdown 处理另核对了官方仓库的 [markdownToRule 实现](https://github.com/continuedev/continue/blob/main/packages/config-yaml/src/markdown/markdownToRule.ts)，没有为此向中立规则源添加客户端专用 frontmatter。
 
 ## Git 同步（手动）
 
@@ -262,7 +253,7 @@ cargo run -p arm-cli -- profiles activate work --apply
 
 ## 操作历史与恢复
 
-侧栏、Profile 页和控制台的「操作历史」入口统一展示本机规则库操作、全局及项目 Agent 接入，以及恢复操作。列表支持按类型筛选；时间使用本地时区，快照编号和完整路径在详情中查看。
+侧栏、Profile 页和控制台的「操作历史」入口统一展示本机规则库操作、Agent 接入（含已移除项目范围的旧记录），以及恢复操作。列表支持按类型筛选；时间使用本地时区，快照编号和完整路径在详情中查看。
 
 - 「历史起点」表示本段可恢复历史开始前的状态，可用于撤销本段的第一条操作。选择普通记录表示恢复到**该操作完成之后**。预览会列出此后将撤销的全部操作、最终文件状态和内容对比；筛选不会缩小恢复范围。历史范围覆盖同一应用状态目录内的所有规则库和项目。
 - 快照记录的是应用管理的文件变化，不是整个目录的完整版本。外部编辑器保存不会自动产生记录；受影响路径存在后续修改、父目录链接或项目边界异常时，整次恢复会在写入前被阻止。
@@ -302,12 +293,6 @@ cargo run -p arm-cli -- apply --agents codex --backup-existing
 cargo run -p arm-cli -- plan --agents qwen --disconnect
 cargo run -p arm-cli -- apply --agents qwen --disconnect
 cargo run -p arm-cli -- rollback
-
-# 项目规则：先预览，再应用（保留全局规则的同一套备份 / 回滚机制）
-cargo run -p arm-cli -- --project /absolute/project status
-cargo run -p arm-cli -- --project /absolute/project plan --agents cursor,copilot-ide
-cargo run -p arm-cli -- --project /absolute/project apply --agents cursor,copilot-ide
-cargo run -p arm-cli -- --project /absolute/project apply --agents cursor --disconnect
 ```
 
 所有命令支持 `--root <directory>` 与 `--state-root <directory>`；查询和计划支持 `--json`。这两个参数只改变规则库和状态目录，不改变 Agent 原生目标路径，不能单独用作接入操作的隔离沙箱。

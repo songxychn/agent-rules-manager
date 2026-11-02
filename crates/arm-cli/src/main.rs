@@ -21,10 +21,6 @@ struct Cli {
     #[arg(long, global = true)]
     state_root: Option<PathBuf>,
 
-    /// Use project rule targets in this existing directory instead of global targets.
-    #[arg(long, global = true)]
-    project: Option<PathBuf>,
-
     #[command(subcommand)]
     command: Command,
 }
@@ -153,10 +149,6 @@ fn run() -> Result<(), ArmError> {
     let state_root = cli.state_root.map(Ok).unwrap_or_else(default_state_root)?;
     let home = default_home_dir()?;
     let manager = RulesManager::new(root, state_root, &home);
-    let manager = match cli.project {
-        Some(project) => manager.for_project(&home, &project)?,
-        None => manager,
-    };
 
     match cli.command {
         Command::Sync {

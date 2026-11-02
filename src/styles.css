@@ -2695,19 +2695,6 @@ code {
   }
 }
 
-.agent-scope-panel {
-  margin-bottom: 24px;
-  padding: 18px 20px;
-  border: 1px solid var(--line, #dce3dc);
-  border-radius: 14px;
-  background: var(--surface, #fff);
-}
-.agent-scope-heading { display: flex; flex-wrap: wrap; align-items: baseline; gap: 12px; margin-bottom: 14px; }
-.agent-scope-heading span, .agent-scope-panel > small { color: #606b65; font-size: 12px; line-height: 1.6; }
-.agent-scope-panel form { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; }
-.agent-scope-panel label { font-size: 12px; }
-.agent-scope-panel input { flex: 1; min-width: 160px; padding: 9px 12px; border: 1px solid #dce3dc; border-radius: 8px; background: transparent; color: inherit; font: inherit; font-size: 12px; }
-.agent-scope-panel > small { display: block; margin-top: 10px; }
 .provider-guidance { margin-top: 14px; font-size: 12px; line-height: 1.7; color: #536159; }
 .provider-guidance summary { cursor: pointer; }
 .provider-guidance p { max-width: 850px; }
@@ -2763,13 +2750,9 @@ code {
 .agent-grid-notice .button { flex-shrink: 0; }
 .agent-grid-notice.tone-danger { border-color: #e8bab5; background: #fff7f5; }
 .agent-grid-empty { padding: 50px 20px; text-align: center; color: var(--ink-muted); font-size: 13px; }
-.agent-scope-panel { display: flex; align-items: center; flex-wrap: wrap; gap: 12px 20px; padding: 0 0 16px; margin-bottom: 16px; border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
-.agent-scope-heading { flex: 1; min-width: 0; margin: 0; align-items: center; gap: 12px; }
-.agent-scope-heading strong { font-size: 13px; }
-.agent-scope-heading code { max-width: 280px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--ink-muted); }
-.agent-scope-panel form, .agent-scope-panel > small { flex-basis: 100%; }
-.agent-scope-panel .provider-guidance { margin: 0; font-size: 11px; }
-.agent-scope-panel .provider-guidance[open] { flex-basis: 100%; }
+.provider-guidance-bar { display: flex; justify-content: flex-end; padding: 0 0 16px; margin-bottom: 16px; border-bottom: 1px solid var(--line); }
+.provider-guidance-bar .provider-guidance { margin: 0; font-size: 11px; }
+.provider-guidance-bar .provider-guidance[open] { flex-basis: 100%; }
 @media (max-width: 1180px) {
   .agent-card-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }

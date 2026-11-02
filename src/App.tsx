@@ -4,7 +4,7 @@ import { LibrarySetupPanel } from "./components/LibrarySetupPanel";
 import { HistoryPage } from "./components/HistoryPage";
 import { GitSyncPage } from "./components/GitSyncPage";
 import { ProfilesPage } from "./components/ProfilesPage";
-import { AgentScopePanel } from "./components/AgentScopePanel";
+import { ProviderGuidance } from "./components/ProviderGuidance";
 import { ProjectionRail } from "./components/ProjectionRail";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { useNotifications } from "./lib/notifications";
@@ -64,7 +64,7 @@ function connectionChanges(
   desiredConnections: Set<string>,
 ): ConnectionChange[] {
   return snapshot.agents
-    .filter((agent) => agent.installed || agent.connected || agent.scope === "project")
+    .filter((agent) => agent.installed || agent.connected)
     .filter(
       (agent) =>
         desiredConnections.has(agent.id) !== agent.connected ||
@@ -80,8 +80,6 @@ function App() {
   const { t } = useI18n();
   const [view, setView] = useState<View>("control");
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
-  const [projectRoot, setProjectRoot] = useState("");
-  const projectRootRef = useRef("");
   const [libraryRoot, setLibraryRoot] = useState("");
   const [libraryInput, setLibraryInput] = useState("");
   const [plan, setPlan] = useState<ProjectionPlan>();
@@ -113,10 +111,8 @@ function App() {
 
   const loadSnapshot = useCallback(async (root?: string) => {
     setBusy("loading");
-    const requestedProject = projectRootRef.current;
     try {
-      const next = await backend.snapshot(root || undefined, requestedProject || undefined);
-      if (requestedProject !== projectRootRef.current) return;
+      const next = await backend.snapshot(root || undefined);
       snapshotRef.current = next;
       setSnapshot(next);
       setLibraryRoot(next.libraryRoot);
@@ -165,13 +161,11 @@ function App() {
     async () => {
       if (!libraryRoot || refreshInFlight.current) return;
       refreshInFlight.current = true;
-      const requestedProject = projectRootRef.current;
       try {
         const [next, nextOpenTargets] = await Promise.all([
-          backend.snapshot(libraryRoot, requestedProject || undefined),
+          backend.snapshot(libraryRoot),
           backend.openTargets(),
         ]);
-        if (requestedProject !== projectRootRef.current) return;
         const changed = workspaceFingerprint(snapshotRef.current) !== workspaceFingerprint(next);
         snapshotRef.current = next;
         setSnapshot(next);
@@ -210,7 +204,7 @@ function App() {
     }
     setBusy("planning");
     try {
-      setPlan(await backend.preview(changes, libraryRoot, projectRoot || undefined));
+      setPlan(await backend.preview(changes, libraryRoot));
     } catch (error) {
       notify({ tone: "error", message: String(error) });
     } finally {
@@ -227,7 +221,7 @@ function App() {
     if (!changes.length) return;
     setBusy("applying");
     try {
-      const outcome = await backend.apply(changes, plan.confirmationCount > 0, libraryRoot, projectRoot || undefined);
+      const outcome = await backend.apply(changes, plan.confirmationCount > 0, libraryRoot);
       notify({
         tone: "success",
         message: outcome.changed.length
@@ -388,24 +382,7 @@ function App() {
     }
     return (
       <>
-        <AgentScopePanel
-          projectRoot={projectRoot}
-          disabled={Boolean(busy)}
-          onChange={async (nextRoot) => {
-            setBusy("loading");
-            try {
-              const next = await backend.snapshot(libraryRoot, nextRoot || undefined);
-              projectRootRef.current = nextRoot;
-              setProjectRoot(nextRoot);
-              snapshotRef.current = next;
-              setSnapshot(next);
-              setDesiredConnections(currentConnections(next));
-              setPlan(undefined);
-            } catch (error) {
-              notify({ tone: "error", message: String(error) });
-            } finally { setBusy(undefined); }
-          }}
-        />
+        <ProviderGuidance />
         <ProjectionRail
           agents={snapshot.agents}
           sourceDigest={snapshot.sourceDigest}

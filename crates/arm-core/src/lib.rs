@@ -10,7 +10,7 @@ pub use library::git_sync::{
     GitSyncOutcome, GitSyncPlan, GitSyncRequest, GitSyncResolution, GitSyncVersion,
 };
 
-pub use adapters::{default_adapters, project_adapters};
+pub use adapters::default_adapters;
 pub use manager::{default_home_dir, default_library_root, default_state_root, RulesManager};
 pub use model::{
     AgentAdapter, AgentStatus, ApplyOutcome, ArmError, ConnectionChange, DeployMode,
