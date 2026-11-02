@@ -206,70 +206,63 @@ export function ProfilesPage({
 
       <div className="library-page-grid">
         <section className="profile-patch-sheet" aria-label={t("profiles.listLabel")}>
-          {profiles.map((profile, index) => {
+          {profiles.map((profile) => {
             const activationPending = activation?.profileId === profile.id;
             const deletionPending = deletion?.profileId === profile.id;
 
             return (
-              <article className={`profile-route-card ${profile.isActive ? "is-active" : ""}`} key={profile.id}>
-                <header>
-                  <span className="profile-sequence">P{String(index + 1).padStart(2, "0")}</span>
-                  <div>
-                    <span className="manifest-id">{profile.id}</span>
+              <article className={`profile-list-row ${profile.isActive ? "is-active" : ""}`} key={profile.id}>
+                <header className="profile-list-identity">
+                  <div className="profile-list-title">
                     <h2>{profile.name}</h2>
-                    <p>{profile.description || t("profiles.noDescription")}</p>
+                    <code title={`profiles/${profile.id}/AGENTS.md`}>{profile.id}</code>
                   </div>
-                  {profile.isActive && <span className="active-machine-badge">{t("profiles.activeHere")}</span>}
+                  {profile.description && <p title={profile.description}>{profile.description}</p>}
                 </header>
 
-                <div className="profile-rule-file">
-                  <div>
-                    <strong>AGENTS.md</strong>
-                    <code>profiles/{profile.id}/AGENTS.md</code>
-                  </div>
+                <div className="profile-list-status">
+                  {profile.isActive && <span className="active-machine-badge">{t("profiles.activeHere")}</span>}
+                  <span className={`runtime-state runtime-${profile.isActive ? runtimeState : "inactive"}`}>
+                    {profile.isActive
+                      ? t(`runtime.${runtimeState}` as "runtime.current")
+                      : t("profiles.notSelected")}
+                  </span>
+                </div>
+
+                <div className="profile-list-actions">
                   <SourceOpenControl
                     fileName="AGENTS.md"
-                    actionLabel={t("profiles.open")}
+                    actionLabel="AGENTS.md"
                     targets={openTargets}
                     preferredTargetId={preferredOpenTargetId}
                     openingTargetId={openingTargetId}
                     onOpen={(targetId) => onOpen(profile.id, "AGENTS.md", targetId)}
                   />
+                  <button
+                    className="button button-danger-ghost button-small"
+                    disabled={profile.isActive || busy !== undefined}
+                    title={profile.isActive ? t("profiles.deleteActiveTitle") : undefined}
+                    aria-label={profile.isActive ? t("profiles.deleteActiveTitle") : undefined}
+                    onClick={() => void requestDeletion(profile.id)}
+                  >
+                    {busy === `prepare-delete-${profile.id}`
+                      ? t("libraryPlan.preparing")
+                      : t("profiles.delete")}
+                  </button>
+                  <button
+                    className={profile.isActive && runtimeState === "current"
+                      ? "button button-ghost button-small"
+                      : "button button-primary button-small"}
+                    disabled={busy !== undefined}
+                    onClick={() => void requestActivation(profile.id)}
+                  >
+                    {busy === `prepare-activation-${profile.id}`
+                      ? t("libraryPlan.preparing")
+                      : profile.isActive
+                        ? t("profiles.refresh")
+                        : t("profiles.switch")}
+                  </button>
                 </div>
-
-                <footer>
-                  <span className={`runtime-state runtime-${profile.isActive ? runtimeState : "missing"}`}>
-                    {profile.isActive
-                      ? t(`runtime.${runtimeState}` as "runtime.current")
-                      : t("profiles.notSelected")}
-                  </span>
-                  <div className="profile-card-actions">
-                    <button
-                      className="button button-danger-ghost button-small"
-                      disabled={profile.isActive || busy !== undefined}
-                      title={profile.isActive ? t("profiles.deleteActiveTitle") : undefined}
-                      aria-label={profile.isActive ? t("profiles.deleteActiveTitle") : undefined}
-                      onClick={() => void requestDeletion(profile.id)}
-                    >
-                      {busy === `prepare-delete-${profile.id}`
-                        ? t("libraryPlan.preparing")
-                        : t("profiles.delete")}
-                    </button>
-                    <button
-                      className={profile.isActive && runtimeState === "current"
-                        ? "button button-ghost button-small"
-                        : "button button-primary button-small"}
-                      disabled={busy !== undefined}
-                      onClick={() => void requestActivation(profile.id)}
-                    >
-                      {busy === `prepare-activation-${profile.id}`
-                        ? t("libraryPlan.preparing")
-                        : profile.isActive
-                          ? t("profiles.refresh")
-                          : t("profiles.switch")}
-                    </button>
-                  </div>
-                </footer>
 
                 {activationPending && (
                   <LibraryChangeConfirm

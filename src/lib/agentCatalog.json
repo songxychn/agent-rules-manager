@@ -2,7 +2,6 @@
   {
     "id": "claude",
     "label": "Claude Code",
-    "scope": "global",
     "path": ".claude/CLAUDE.md",
     "commands": [
       "claude"
@@ -21,7 +20,6 @@
   {
     "id": "codex",
     "label": "Codex",
-    "scope": "global",
     "path": ".codex/AGENTS.md",
     "commands": [
       "codex"
@@ -42,7 +40,6 @@
   {
     "id": "grok",
     "label": "Grok Build",
-    "scope": "global",
     "path": ".grok/AGENTS.md",
     "commands": [
       "grok",
@@ -66,7 +63,6 @@
   {
     "id": "opencode",
     "label": "OpenCode",
-    "scope": "global",
     "path": ".config/opencode/AGENTS.md",
     "commands": [
       "opencode"
@@ -88,7 +84,6 @@
   {
     "id": "qwen",
     "label": "Qwen Code",
-    "scope": "global",
     "path": ".qwen/QWEN.md",
     "commands": [
       "qwen"
@@ -107,7 +102,6 @@
   {
     "id": "gemini",
     "label": "Gemini CLI",
-    "scope": "global",
     "path": ".gemini/GEMINI.md",
     "commands": [
       "gemini"
@@ -126,7 +120,6 @@
   {
     "id": "antigravity",
     "label": "Antigravity",
-    "scope": "global",
     "path": ".gemini/GEMINI.md",
     "commands": [
       "antigravity"
@@ -150,7 +143,6 @@
   {
     "id": "copilot",
     "label": "GitHub Copilot CLI",
-    "scope": "global",
     "path": ".copilot/copilot-instructions.md",
     "commands": [
       "copilot"
@@ -171,7 +163,6 @@
   {
     "id": "devin-desktop",
     "label": "Devin Desktop（原 Windsurf）",
-    "scope": "global",
     "path": ".devin/global_rules.md",
     "commands": [
       "devin-desktop",
@@ -200,7 +191,6 @@
   {
     "id": "windsurf",
     "label": "Windsurf 旧版（Cascade）",
-    "scope": "global",
     "path": ".codeium/windsurf/memories/global_rules.md",
     "commands": [
       "windsurf"
@@ -221,7 +211,6 @@
   {
     "id": "cline-global",
     "label": "Cline（当前版本）",
-    "scope": "global",
     "path": ".cline/rules/agent-rules.md",
     "commands": [
       "cline"
@@ -244,7 +233,6 @@
   {
     "id": "cline",
     "label": "Cline（Documents 规则目录）",
-    "scope": "global",
     "path": "Documents/Cline/Rules/agent-rules.md",
     "commands": [],
     "markers": [
@@ -261,7 +249,6 @@
   {
     "id": "cline-cli",
     "label": "Cline CLI 旧版（独立规则目录）",
-    "scope": "global",
     "path": ".cline/data/settings/rules/agent-rules.md",
     "commands": [
       "cline"
@@ -280,7 +267,6 @@
   {
     "id": "roo",
     "label": "Roo Code（已停止维护）",
-    "scope": "global",
     "path": ".roo/rules/agent-rules.md",
     "commands": [],
     "markers": [
@@ -299,7 +285,6 @@
   {
     "id": "kilo",
     "label": "Kilo Code（旧版 VS Code 扩展）",
-    "scope": "global",
     "path": ".kilocode/rules/agent-rules.md",
     "commands": [],
     "markers": [
@@ -318,7 +303,6 @@
   {
     "id": "kiro",
     "label": "Kiro（IDE / CLI）",
-    "scope": "global",
     "path": ".kiro/steering/agent-rules.md",
     "commands": [
       "kiro",
@@ -338,65 +322,8 @@
     "maxBytes": null
   },
   {
-    "id": "cursor",
-    "label": "Cursor",
-    "scope": "project",
-    "path": "AGENTS.md",
-    "commands": [
-      "cursor",
-      "cursor-agent"
-    ],
-    "markers": [
-      ".cursor"
-    ],
-    "apps": [
-      "Cursor"
-    ],
-    "aliases": [],
-    "note": "Project AGENTS.md. Global User Rules remain in Cursor Settings.",
-    "docsUrl": "https://cursor.com/docs/context/rules",
-    "maxChars": null,
-    "noteZh": "使用项目根 AGENTS.md；全局 User Rules 仍在 Cursor 设置中管理。",
-    "maxBytes": null
-  },
-  {
-    "id": "copilot-ide",
-    "label": "GitHub Copilot (IDE)",
-    "scope": "project",
-    "path": ".github/copilot-instructions.md",
-    "commands": [],
-    "markers": [],
-    "apps": [],
-    "aliases": [],
-    "note": "Repository instructions; IDE support depends on the Copilot client.",
-    "docsUrl": "https://docs.github.com/en/copilot/reference/custom-instructions-support",
-    "maxChars": null,
-    "noteZh": "使用仓库级说明文件；支持范围取决于 Copilot 客户端。",
-    "maxBytes": null
-  },
-  {
-    "id": "continue",
-    "label": "Continue",
-    "scope": "project",
-    "path": ".continue/rules/agent-rules.md",
-    "commands": [
-      "cn"
-    ],
-    "markers": [
-      ".continue"
-    ],
-    "apps": [],
-    "aliases": [],
-    "note": "",
-    "docsUrl": "https://docs.continue.dev/customize/deep-dives/rules",
-    "maxChars": null,
-    "noteZh": "",
-    "maxBytes": null
-  },
-  {
     "id": "amp",
     "label": "Amp",
-    "scope": "global",
     "path": ".config/amp/AGENTS.md",
     "commands": [
       "amp"
@@ -415,7 +342,6 @@
   {
     "id": "droid",
     "label": "Factory Droid",
-    "scope": "global",
     "path": ".factory/AGENTS.md",
     "commands": [
       "droid"
@@ -436,7 +362,6 @@
   {
     "id": "augment",
     "label": "Augment Code / Auggie",
-    "scope": "global",
     "path": ".augment/rules/agent-rules.md",
     "commands": [
       "auggie"
@@ -457,7 +382,6 @@
   {
     "id": "zed",
     "label": "Zed Agent（macOS / Linux）",
-    "scope": "global",
     "path": ".config/zed/AGENTS.md",
     "commands": [
       "zed"
@@ -478,7 +402,6 @@
   {
     "id": "zed-windows",
     "label": "Zed Agent（Windows）",
-    "scope": "global",
     "platform": "windows",
     "path": "AppData/Roaming/Zed/AGENTS.md",
     "commands": [
@@ -491,25 +414,6 @@
     "docsUrl": "https://zed.dev/docs/ai/instructions",
     "maxChars": null,
     "noteZh": "Windows 原生 Zed Agent 规则，位于 %APPDATA%/Zed/AGENTS.md。APPDATA 缺失或无效时使用 ~/AppData/Roaming/Zed/AGENTS.md。与旧 .config 路径单独接入；已有文件须确认备份接管。",
-    "maxBytes": null
-  },
-  {
-    "id": "junie",
-    "label": "Junie（JetBrains 插件）",
-    "scope": "project",
-    "path": ".junie/AGENTS.md",
-    "commands": [
-      "junie"
-    ],
-    "markers": [
-      ".junie"
-    ],
-    "apps": [],
-    "aliases": [],
-    "note": "JetBrains plugin rules. When .junie/AGENTS.md exists it replaces the default root rules and playbook/rules combination; a custom Guidelines path takes precedence.",
-    "docsUrl": "https://junie.jetbrains.com/docs/junie-plugin-project-settings.html",
-    "maxChars": null,
-    "noteZh": "JetBrains 插件的项目规则。存在 .junie/AGENTS.md 时，不再组合读取根 AGENTS.md、playbook 和 rules；自定义 Guidelines path 优先。",
     "maxBytes": null
   }
 ]

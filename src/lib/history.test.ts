@@ -10,22 +10,22 @@ describe("operation history demo", () => {
     const initial = (await backend.history())[0];
     await backend.createProfile({ id: "test", name: "Test", description: "" });
     await backend.activateProfile("test");
-    await backend.apply([{ agentId: "cursor", connected: true }], false, undefined, "/test-project");
-    const projectBefore = await backend.snapshot(undefined, "/test-project");
+    await backend.apply([{ agentId: "qwen", connected: true }], false);
+    const connectedAgents = (await backend.snapshot()).agents;
     const latest = (await backend.history())[0];
     const current = await backend.snapshot();
     const preview = await backend.previewRestore(initial.id);
     expect(preview.operations).toHaveLength(3);
-    expect(preview.steps.some((s) => s.path.includes("/test-project"))).toBe(true);
+    expect(preview.steps.some((s) => s.path.endsWith("/.qwen/QWEN.md"))).toBe(true);
     expect(await backend.snapshot()).toEqual(current);
     await backend.restoreHistory(initial.id, preview.token);
     expect((await backend.snapshot()).profiles).toEqual(before.profiles);
-    expect((await backend.snapshot(undefined, "/test-project")).agents.find((a) => a.id === "cursor")?.connected).toBe(false);
+    expect((await backend.snapshot()).agents.find((a) => a.id === "qwen")?.connected).toBe(false);
     expect((await backend.history())[0].operation).toBe("restoreHistory");
     const undo = await backend.previewRestore(latest.id);
     await backend.restoreHistory(latest.id, undo.token);
     expect((await backend.snapshot()).profiles).toEqual(current.profiles);
-    expect((await backend.snapshot(undefined, "/test-project")).agents).toEqual(projectBefore.agents);
+    expect((await backend.snapshot()).agents).toEqual(connectedAgents);
   });
 
   it("rejects stale confirmation when another operation was added", async () => {

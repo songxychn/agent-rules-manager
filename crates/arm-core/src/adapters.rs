@@ -1,14 +1,13 @@
-use crate::{AgentAdapter, ArmError, DeployMode};
+use crate::{AgentAdapter, DeployMode};
 use serde::Deserialize;
 use std::env;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Definition {
     id: String,
     label: String,
-    scope: String,
     platform: Option<String>,
     path: String,
     commands: Vec<String>,
@@ -32,24 +31,18 @@ fn env_root(read_env: &dyn Fn(&str) -> Option<PathBuf>, name: &str, fallback: Pa
         .unwrap_or(fallback)
 }
 
-fn adapters(
-    home: &Path,
-    project: Option<&Path>,
-    read_env: &dyn Fn(&str) -> Option<PathBuf>,
-) -> Vec<AgentAdapter> {
-    adapters_for_platform(home, project, read_env, env::consts::OS)
+fn adapters(home: &Path, read_env: &dyn Fn(&str) -> Option<PathBuf>) -> Vec<AgentAdapter> {
+    adapters_for_platform(home, read_env, env::consts::OS)
 }
 
 fn adapters_for_platform(
     home: &Path,
-    project: Option<&Path>,
     read_env: &dyn Fn(&str) -> Option<PathBuf>,
     platform: &str,
 ) -> Vec<AgentAdapter> {
     let mut result: Vec<AgentAdapter> = Vec::new();
     for mut definition in definitions()
         .into_iter()
-        .filter(|d| (d.scope == "project") == project.is_some())
         .filter(|d| d.platform.as_deref().is_none_or(|name| name == platform))
     {
         // The old tool path remains manageable on Windows, but a native Zed
@@ -58,9 +51,9 @@ fn adapters_for_platform(
             definition.commands.clear();
             definition.apps.clear();
         }
-        let mut target = project.unwrap_or(home).join(&definition.path);
-        if project.is_none() {
-            target = match definition.id.as_str() {
+        let target = home.join(&definition.path);
+        let target =
+            match definition.id.as_str() {
                 "opencode" => env_root(
                     read_env,
                     "OPENCODE_CONFIG_DIR",
@@ -85,15 +78,12 @@ fn adapters_for_platform(
                 }
                 _ => target,
             };
-        }
         let mut detection_paths = definition
             .markers
             .iter()
             .map(|path| home.join(path))
             .collect::<Vec<_>>();
-        if project.is_none() {
-            detection_paths.push(target.parent().unwrap().to_path_buf());
-        }
+        detection_paths.push(target.parent().unwrap().to_path_buf());
         for command in &definition.commands {
             for directory in [
                 ".local/bin",
@@ -118,8 +108,6 @@ fn adapters_for_platform(
             "cline" | "cline-global" => Some("saoudrizwan.claude-dev-"),
             "roo" => Some("rooveterinaryinc.roo-cline-"),
             "kilo" => Some("kilocode.kilo-code-"),
-            "continue" => Some("continue.continue-"),
-            "copilot-ide" => Some("github.copilot-"),
             _ => None,
         };
         if let Some(prefix) = extension_prefix {
@@ -170,7 +158,6 @@ fn adapters_for_platform(
             command_names: definition.commands,
             detection_paths,
             aliases: definition.aliases,
-            scope: definition.scope,
             docs_url: definition.docs_url,
             max_chars: definition.max_chars,
             max_bytes: definition.max_bytes,
@@ -180,28 +167,12 @@ fn adapters_for_platform(
 }
 
 pub fn default_adapters(home: &Path) -> Vec<AgentAdapter> {
-    adapters(home, None, &|name| env::var_os(name).map(PathBuf::from))
-}
-
-pub fn project_adapters(home: &Path, project: &Path) -> Result<Vec<AgentAdapter>, ArmError> {
-    if !project.is_absolute()
-        || !project.is_dir()
-        || project
-            .components()
-            .any(|c| matches!(c, Component::ParentDir))
-    {
-        return Err(ArmError::UnsupportedEntry(project.display().to_string()));
-    }
-    // Resolve the chosen root once; no working-directory fallback or directory creation.
-    let project = project
-        .canonicalize()
-        .map_err(|e| ArmError::io(project.display().to_string(), e))?;
-    Ok(adapters(home, Some(&project), &|_| None))
+    adapters(home, &|name| env::var_os(name).map(PathBuf::from))
 }
 
 #[cfg(test)]
 pub(crate) fn test_adapters(home: &Path) -> Vec<AgentAdapter> {
-    adapters(home, None, &|_| None)
+    adapters(home, &|_| None)
 }
 
 #[cfg(test)]
@@ -209,13 +180,14 @@ pub(crate) fn test_windows_adapters(
     home: &Path,
     read_env: &dyn Fn(&str) -> Option<PathBuf>,
 ) -> Vec<AgentAdapter> {
-    adapters_for_platform(home, None, read_env, "windows")
+    adapters_for_platform(home, read_env, "windows")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+    use std::path::Component;
 
     #[test]
     fn catalog_has_unique_ids_and_safe_relative_targets() {
@@ -223,7 +195,6 @@ mod tests {
         let mut ids = BTreeSet::new();
         for definition in definitions {
             assert!(ids.insert(definition.id));
-            assert!(matches!(definition.scope.as_str(), "global" | "project"));
             assert!(Path::new(&definition.path)
                 .components()
                 .all(|c| matches!(c, Component::Normal(_))));
@@ -233,7 +204,7 @@ mod tests {
     #[test]
     fn shared_files_are_one_target_with_aliases() {
         let home = tempfile::tempdir().unwrap();
-        let adapters = adapters(home.path(), None, &|_| None);
+        let adapters = adapters(home.path(), &|_| None);
         let targets = adapters
             .iter()
             .map(|a| &a.target_path)
@@ -250,19 +221,6 @@ mod tests {
     }
 
     #[test]
-    fn project_targets_require_an_explicit_existing_absolute_directory() {
-        let home = tempfile::tempdir().unwrap();
-        assert!(project_adapters(home.path(), Path::new("relative")).is_err());
-        assert!(project_adapters(home.path(), &home.path().join("missing")).is_err());
-        let adapters = project_adapters(home.path(), home.path()).unwrap();
-        let cursor = adapters.iter().find(|a| a.id == "cursor").unwrap();
-        assert_eq!(
-            cursor.target_path,
-            home.path().canonicalize().unwrap().join("AGENTS.md")
-        );
-        assert!(adapters.iter().all(|a| a.scope == "project"));
-    }
-    #[test]
     fn environment_roots_are_resolved_without_changing_process_environment() {
         let home = Path::new("/home/test");
         let env = |name: &str| match name {
@@ -273,7 +231,7 @@ mod tests {
             "CLINE_DIR" => Some(PathBuf::from("/cline")),
             _ => None,
         };
-        let adapters = adapters(home, None, &env);
+        let adapters = adapters(home, &env);
         let target = |id: &str| {
             adapters
                 .iter()
@@ -340,13 +298,11 @@ mod tests {
         let home = tempfile::tempdir().unwrap();
         let env = |_: &str| Some(home.path().join("roaming"));
         for platform in ["macos", "linux"] {
-            let adapters = adapters_for_platform(home.path(), None, &env, platform);
+            let adapters = adapters_for_platform(home.path(), &env, platform);
             assert!(!adapters.iter().any(|a| a.id == "zed-windows"));
             let zed = adapters.iter().find(|a| a.id == "zed").unwrap();
             assert_eq!(zed.target_path, home.path().join(".config/zed/AGENTS.md"));
             assert!(zed.command_names.iter().any(|c| c == "zed"));
         }
-        let project = adapters_for_platform(home.path(), Some(home.path()), &env, "windows");
-        assert!(!project.iter().any(|a| a.id.starts_with("zed")));
     }
 }

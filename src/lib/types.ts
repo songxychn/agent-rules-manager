@@ -62,7 +62,6 @@ export interface AgentStatus {
   installed: boolean;
   connected: boolean;
   detectionDetail: string;
-  scope?: "global" | "project";
   note?: string;
   docsUrl?: string;
   maxChars?: number;

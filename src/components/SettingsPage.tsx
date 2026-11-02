@@ -8,6 +8,15 @@ import {
   relaunchApp,
   type AppUpdateCheck,
 } from "../lib/appUpdate";
+import { SYNC_WATCH_INTERVAL_MS, type SyncWatchStatus } from "../lib/syncWatch";
+
+export interface SyncWatchSettings {
+  enabled: boolean;
+  status: SyncWatchStatus;
+  checking: boolean;
+  onToggle: (enabled: boolean) => void;
+  onCheck: () => void;
+}
 
 const options: LanguagePreference[] = ["system", "zh-CN", "en"];
 
@@ -25,8 +34,8 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
-export function SettingsPage() {
-  const { preference, setPreference, systemLocale, t } = useI18n();
+export function SettingsPage({ syncWatch }: { syncWatch: SyncWatchSettings }) {
+  const { preference, setPreference, systemLocale, locale, t } = useI18n();
   const [updateView, setUpdateView] = useState<UpdateView>({ phase: "loading" });
 
   const languageTitle = (value: LanguagePreference) => {
@@ -133,6 +142,25 @@ export function SettingsPage() {
     };
   }
 
+  const watchStatus = syncWatch.status;
+  const checkedAt = "checkedAt" in watchStatus
+    ? new Date(watchStatus.checkedAt).toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
+    : "";
+  const syncWatchStatus = syncWatch.checking
+    ? t("syncWatch.checking")
+    : watchStatus.phase === "off" ? t("syncWatch.off")
+    : watchStatus.phase === "idle" ? t("syncWatch.idle")
+    : watchStatus.phase === "unconfigured" ? t("syncWatch.unconfigured")
+    : watchStatus.phase === "clean" ? t("syncWatch.clean", { time: checkedAt })
+    : watchStatus.phase === "pending"
+      ? t("syncWatch.pending", {
+          time: checkedAt,
+          local: watchStatus.summary.toLocal,
+          remote: watchStatus.summary.toRemote,
+          conflicts: watchStatus.summary.conflicts,
+        })
+      : t("syncWatch.error", { time: checkedAt, message: watchStatus.message });
+
   return (
     <section className="settings-page" aria-labelledby="settings-heading">
       <header className="settings-masthead">
@@ -167,6 +195,39 @@ export function SettingsPage() {
                 </option>
               ))}
             </select>
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <div className="settings-row-copy">
+            <strong id="sync-watch-title">{t("syncWatch.title")}</strong>
+            <p id="sync-watch-note">
+              {t("syncWatch.body", { minutes: SYNC_WATCH_INTERVAL_MS / 60_000 })}
+            </p>
+            <small aria-live="polite">{syncWatchStatus}</small>
+          </div>
+          <div className="settings-row-actions">
+            {syncWatch.enabled && watchStatus.phase !== "unconfigured" && (
+              <button
+                className="button button-ghost button-small"
+                type="button"
+                disabled={syncWatch.checking}
+                onClick={syncWatch.onCheck}
+              >
+                {t("syncWatch.checkNow")}
+              </button>
+            )}
+            <button
+              type="button"
+              className={`connection-switch ${syncWatch.enabled ? "is-on" : ""}`}
+              role="switch"
+              aria-checked={syncWatch.enabled}
+              aria-labelledby="sync-watch-title"
+              aria-describedby="sync-watch-note"
+              onClick={() => syncWatch.onToggle(!syncWatch.enabled)}
+            >
+              <span className="switch-track" aria-hidden="true"><span className="switch-knob" /></span>
+            </button>
           </div>
         </div>
 

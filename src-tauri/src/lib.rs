@@ -63,30 +63,12 @@ fn build_manager(app: &AppHandle, library_root: Option<String>) -> Result<RulesM
     Ok(RulesManager::new(root, state_root, &home))
 }
 
-fn build_projection_manager(
-    app: &AppHandle,
-    library_root: Option<String>,
-    project_root: Option<String>,
-) -> Result<RulesManager, String> {
-    let manager = build_manager(app, library_root)?;
-    match project_root.filter(|path| !path.trim().is_empty()) {
-        Some(project) => {
-            let home = default_home_dir().map_err(|error| error.to_string())?;
-            manager
-                .for_project(&home, &PathBuf::from(project))
-                .map_err(|e| e.to_string())
-        }
-        None => Ok(manager),
-    }
-}
-
 #[tauri::command]
 fn get_workspace_snapshot(
     app: AppHandle,
     library_root: Option<String>,
-    project_root: Option<String>,
 ) -> Result<WorkspaceSnapshot, String> {
-    build_projection_manager(&app, library_root, project_root)?
+    build_manager(&app, library_root)?
         .snapshot()
         .map_err(|error| error.to_string())
 }
@@ -182,10 +164,9 @@ fn activate_profile(
 fn preview_apply(
     app: AppHandle,
     library_root: Option<String>,
-    project_root: Option<String>,
     changes: Vec<ConnectionChange>,
 ) -> Result<ProjectionPlan, String> {
-    build_projection_manager(&app, library_root, project_root)?
+    build_manager(&app, library_root)?
         .plan_connections(&changes)
         .map_err(|error| error.to_string())
 }
@@ -213,11 +194,10 @@ fn open_rule_source(
 fn apply_rules(
     app: AppHandle,
     library_root: Option<String>,
-    project_root: Option<String>,
     changes: Vec<ConnectionChange>,
     confirm_existing_files: bool,
 ) -> Result<ApplyOutcome, String> {
-    build_projection_manager(&app, library_root, project_root)?
+    build_manager(&app, library_root)?
         .apply_connections_confirmed(&changes, confirm_existing_files)
         .map_err(|error| error.to_string())
 }

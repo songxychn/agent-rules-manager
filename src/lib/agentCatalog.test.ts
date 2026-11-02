@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { agentNote, agentWarning, demoAgents } from "./agentCatalog";
 
-describe("agent catalog and project demo", () => {
+describe("agent catalog demo", () => {
   beforeEach(() => { vi.resetModules(); vi.stubGlobal("window", {}); });
   afterEach(() => vi.unstubAllGlobals());
 
   it("deduplicates Gemini and Antigravity's shared file", () => {
-    const agents = demoAgents("global", "/home/test");
+    const agents = demoAgents("/home/test");
     expect(new Set(agents.map((a) => a.targetPath)).size).toBe(agents.length);
     expect(agents.find((a) => a.id === "gemini")?.label).toContain("Antigravity");
     expect(agents.find((a) => a.id === "gemini")?.maxBytes).toBe(24000);
@@ -16,7 +16,7 @@ describe("agent catalog and project demo", () => {
   });
 
   it("formats byte limits without presenting them as character limits", () => {
-    const agent = demoAgents("global", "/home/test").find((a) => a.id === "gemini")!;
+    const agent = demoAgents("/home/test").find((a) => a.id === "gemini")!;
     expect(agentWarning(agent, true)).toBeUndefined();
     const warning = { ...agent, warning: "Rules exceed the per-file byte limit." };
     expect(agentWarning(warning, true)).toContain("24,000 字节（UTF-8）");
@@ -27,17 +27,16 @@ describe("agent catalog and project demo", () => {
 
   it("shows the Windows Zed entry separately while retaining the old selector and path", () => {
     for (const platform of ["macos", "linux"]) {
-      const agents = demoAgents("global", "/home/test", platform);
+      const agents = demoAgents("/home/test", platform);
       expect(agents.some((a) => a.id === "zed-windows")).toBe(false);
       expect(agents.find((a) => a.id === "zed")?.targetPath).toBe("/home/test/.config/zed/AGENTS.md");
     }
-    const windows = demoAgents("global", "C:/Users/demo", "windows");
+    const windows = demoAgents("C:/Users/demo", "windows");
     const native = windows.find((a) => a.id === "zed-windows")!;
     expect(native.targetPath).toBe("C:/Users/demo/AppData/Roaming/Zed/AGENTS.md");
     expect(agentNote(native, true)).toContain("%APPDATA%");
     expect(windows.find((a) => a.id === "zed")?.targetPath).toBe("C:/Users/demo/.config/zed/AGENTS.md");
     expect(new Set(windows.map((a) => a.targetPath)).size).toBe(windows.length);
-    expect(demoAgents("project", "C:/project", "windows").some((a) => a.id.startsWith("zed"))).toBe(false);
   });
 
   it("keeps current Cline connections separate from both older rule directories", async () => {
@@ -54,22 +53,6 @@ describe("agent catalog and project demo", () => {
     }
     await backend.rollback();
     expect((await backend.snapshot()).agents).toEqual(before.agents);
-  });
-
-  it("keeps project connections isolated and rolls back the latest project's changes", async () => {
-    const { backend } = await import("./backend");
-    const beforeGlobal = await backend.snapshot();
-    const beforeB = await backend.snapshot(undefined, "/project-b");
-    const changes = [{ agentId: "cursor", connected: true }];
-    expect((await backend.preview(changes, undefined, "/project-a")).changeCount).toBe(1);
-    await backend.apply(changes, false, undefined, "/project-a");
-    const connectedA = await backend.snapshot(undefined, "/project-a");
-    expect(connectedA.agents.find((a) => a.id === "cursor")?.connected).toBe(true);
-    expect((await backend.snapshot()).agents).toEqual(beforeGlobal.agents);
-    expect((await backend.snapshot(undefined, "/project-b")).agents).toEqual(beforeB.agents);
-    expect((await backend.preview(changes, undefined, "/project-a")).changeCount).toBe(0);
-    await backend.rollback();
-    expect((await backend.snapshot(undefined, "/project-a")).agents.find((a) => a.id === "cursor")?.connected).toBe(false);
   });
 
   it("previews Devin Desktop separately and preserves the legacy Cascade connection on rollback", async () => {
@@ -98,11 +81,5 @@ describe("agent catalog and project demo", () => {
     expect((await backend.snapshot()).agents.find((a) => a.id === "devin-desktop")?.connected).toBe(true);
     await backend.rollback();
     expect((await backend.snapshot()).agents).toEqual(before.agents);
-  });
-
-  it("rejects invalid demo project paths", async () => {
-    const { backend } = await import("./backend");
-    await expect(backend.snapshot(undefined, "relative")).rejects.toThrow("absolute");
-    await expect(backend.snapshot(undefined, "/project/../elsewhere")).rejects.toThrow("absolute");
   });
 });

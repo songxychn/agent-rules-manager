@@ -40,7 +40,7 @@ export function ProjectionRail({
   const zh = locale === "zh-CN";
   const [query, setQuery] = useState("");
   const [filter, setFilter] = useState<"all" | "available" | "connected">("available");
-  const isAvailable = (agent: AgentStatus) => agent.installed || agent.connected || agent.scope === "project";
+  const isAvailable = (agent: AgentStatus) => agent.installed || agent.connected;
   const availableCount = agents.filter(isAvailable).length;
   const detectedAgents = agents.filter((agent) => agent.installed || agent.connected);
   const connectedCount = detectedAgents.filter((agent) => agent.connected).length;
@@ -170,7 +170,7 @@ export function ProjectionRail({
                   role="switch"
                   aria-checked={desiredConnected}
                   aria-label={t("projection.toggleLabel", { agent: agent.label })}
-                  disabled={(!available && agent.scope !== "project") || loading || applying}
+                  disabled={!available || loading || applying}
                   onClick={() => onToggle(agent.id, !desiredConnected)}
                 >
                   <span className="switch-track" aria-hidden="true"><span className="switch-knob" /></span>

@@ -4,7 +4,7 @@ import { LibrarySetupPanel } from "./components/LibrarySetupPanel";
 import { HistoryPage } from "./components/HistoryPage";
 import { GitSyncPage } from "./components/GitSyncPage";
 import { ProfilesPage } from "./components/ProfilesPage";
-import { AgentScopePanel } from "./components/AgentScopePanel";
+import { ProviderGuidance } from "./components/ProviderGuidance";
 import { ProjectionRail } from "./components/ProjectionRail";
 import { NotificationCenter } from "./components/NotificationCenter";
 import { useNotifications } from "./lib/notifications";
@@ -13,6 +13,8 @@ import { backend } from "./lib/backend";
 import { checkForAppUpdate } from "./lib/appUpdate";
 import { useI18n } from "./lib/i18n";
 import { readPreferredOpenTarget, writePreferredOpenTarget } from "./lib/openTargets";
+import { readSyncWatchEnabled, writeSyncWatchEnabled } from "./lib/syncWatch";
+import { useSyncWatch } from "./lib/useSyncWatch";
 import type {
   ConnectionChange,
   LibraryPlan,
@@ -62,7 +64,7 @@ function connectionChanges(
   desiredConnections: Set<string>,
 ): ConnectionChange[] {
   return snapshot.agents
-    .filter((agent) => agent.installed || agent.connected || agent.scope === "project")
+    .filter((agent) => agent.installed || agent.connected)
     .filter(
       (agent) =>
         desiredConnections.has(agent.id) !== agent.connected ||
@@ -78,8 +80,6 @@ function App() {
   const { t } = useI18n();
   const [view, setView] = useState<View>("control");
   const [snapshot, setSnapshot] = useState<WorkspaceSnapshot>();
-  const [projectRoot, setProjectRoot] = useState("");
-  const projectRootRef = useRef("");
   const [libraryRoot, setLibraryRoot] = useState("");
   const [libraryInput, setLibraryInput] = useState("");
   const [plan, setPlan] = useState<ProjectionPlan>();
@@ -93,13 +93,26 @@ function App() {
   const { notify } = notifications;
   const snapshotRef = useRef<WorkspaceSnapshot>();
   const refreshInFlight = useRef(false);
+  const [syncWatchEnabled, setSyncWatchEnabled] = useState(readSyncWatchEnabled);
+  const syncWatch = useSyncWatch({
+    libraryRoot,
+    enabled: syncWatchEnabled,
+    paused: view === "sync",
+    onPending: (summary) => notify({
+      tone: "info",
+      message: t("syncWatch.notice", {
+        local: summary.toLocal,
+        remote: summary.toRemote,
+        conflicts: summary.conflicts,
+      }),
+    }),
+    onError: (message) => notify({ tone: "error", message: t("syncWatch.failed", { message }) }),
+  });
 
   const loadSnapshot = useCallback(async (root?: string) => {
     setBusy("loading");
-    const requestedProject = projectRootRef.current;
     try {
-      const next = await backend.snapshot(root || undefined, requestedProject || undefined);
-      if (requestedProject !== projectRootRef.current) return;
+      const next = await backend.snapshot(root || undefined);
       snapshotRef.current = next;
       setSnapshot(next);
       setLibraryRoot(next.libraryRoot);
@@ -148,13 +161,11 @@ function App() {
     async () => {
       if (!libraryRoot || refreshInFlight.current) return;
       refreshInFlight.current = true;
-      const requestedProject = projectRootRef.current;
       try {
         const [next, nextOpenTargets] = await Promise.all([
-          backend.snapshot(libraryRoot, requestedProject || undefined),
+          backend.snapshot(libraryRoot),
           backend.openTargets(),
         ]);
-        if (requestedProject !== projectRootRef.current) return;
         const changed = workspaceFingerprint(snapshotRef.current) !== workspaceFingerprint(next);
         snapshotRef.current = next;
         setSnapshot(next);
@@ -193,7 +204,7 @@ function App() {
     }
     setBusy("planning");
     try {
-      setPlan(await backend.preview(changes, libraryRoot, projectRoot || undefined));
+      setPlan(await backend.preview(changes, libraryRoot));
     } catch (error) {
       notify({ tone: "error", message: String(error) });
     } finally {
@@ -210,7 +221,7 @@ function App() {
     if (!changes.length) return;
     setBusy("applying");
     try {
-      const outcome = await backend.apply(changes, plan.confirmationCount > 0, libraryRoot, projectRoot || undefined);
+      const outcome = await backend.apply(changes, plan.confirmationCount > 0, libraryRoot);
       notify({
         tone: "success",
         message: outcome.changed.length
@@ -324,9 +335,17 @@ function App() {
         : undefined;
 
   const renderReadyView = () => {
-    if (view === "sync") return <GitSyncPage key={libraryRoot} libraryRoot={libraryRoot} onSynced={() => loadSnapshot(libraryRoot)} onProfiles={() => setView("profiles")} />;
-    if (view === "history") return <HistoryPage key={libraryRoot} libraryRoot={libraryRoot} onRestored={() => loadSnapshot(libraryRoot)} />;
-    if (view === "settings") return <SettingsPage />;
+    if (view === "sync") return <GitSyncPage key={libraryRoot} libraryRoot={libraryRoot} onSynced={() => { syncWatch.invalidate(); return loadSnapshot(libraryRoot); }} onProfiles={() => setView("profiles")} />;
+    if (view === "history") return <HistoryPage key={libraryRoot} libraryRoot={libraryRoot} onRestored={() => { syncWatch.invalidate(); return loadSnapshot(libraryRoot); }} />;
+    if (view === "settings") {
+      return <SettingsPage syncWatch={{
+        enabled: syncWatchEnabled,
+        status: syncWatch.status,
+        checking: syncWatch.checking,
+        onToggle: (enabled) => { setSyncWatchEnabled(enabled); writeSyncWatchEnabled(enabled); },
+        onCheck: () => void syncWatch.check(),
+      }} />;
+    }
     if (view === "profiles") {
       return (
         <ProfilesPage
@@ -363,24 +382,7 @@ function App() {
     }
     return (
       <>
-        <AgentScopePanel
-          projectRoot={projectRoot}
-          disabled={Boolean(busy)}
-          onChange={async (nextRoot) => {
-            setBusy("loading");
-            try {
-              const next = await backend.snapshot(libraryRoot, nextRoot || undefined);
-              projectRootRef.current = nextRoot;
-              setProjectRoot(nextRoot);
-              snapshotRef.current = next;
-              setSnapshot(next);
-              setDesiredConnections(currentConnections(next));
-              setPlan(undefined);
-            } catch (error) {
-              notify({ tone: "error", message: String(error) });
-            } finally { setBusy(undefined); }
-          }}
-        />
+        <ProviderGuidance />
         <ProjectionRail
           agents={snapshot.agents}
           sourceDigest={snapshot.sourceDigest}
@@ -426,6 +428,11 @@ function App() {
             >
               <span className="nav-icon"><AppIcon name={item === "history" ? "rollback" : item} /></span>
               {t(`nav.${item}` as "nav.control")}
+              {item === "sync" && syncWatch.status.phase === "pending" && (
+                <small className="nav-badge-pending" title={t("syncWatch.badge")}>
+                  {syncWatch.status.summary.toLocal + syncWatch.status.summary.toRemote + syncWatch.status.summary.conflicts || "!"}
+                </small>
+              )}
             </button>
           ))}
         </div>

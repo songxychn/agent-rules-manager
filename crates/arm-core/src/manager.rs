@@ -20,7 +20,6 @@ pub struct RulesManager {
     library_root: PathBuf,
     state_root: PathBuf,
     adapters: Vec<AgentAdapter>,
-    project_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -60,7 +59,6 @@ struct PreparedChange {
     original: FileState,
     desired: FileState,
     preserve_original: bool,
-    project_root: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -98,7 +96,6 @@ impl RulesManager {
             library_root,
             state_root,
             adapters: default_adapters(home),
-            project_root: None,
         }
     }
 
@@ -111,30 +108,7 @@ impl RulesManager {
             library_root,
             state_root,
             adapters,
-            project_root: None,
         }
-    }
-
-    /// Select project-native targets instead of machine-global targets.
-    pub fn for_project(mut self, home: &Path, project: &Path) -> Result<Self, ArmError> {
-        self.adapters = crate::project_adapters(home, project)?;
-        let project = project
-            .canonicalize()
-            .map_err(|e| ArmError::io(project.display().to_string(), e))?;
-        for protected in [&self.library_root, &self.state_root] {
-            let protected = protected
-                .canonicalize()
-                .unwrap_or(absolute_logical_path(protected)?);
-            if self
-                .adapters
-                .iter()
-                .any(|a| a.target_path.starts_with(&protected))
-            {
-                return Err(ArmError::UnsupportedEntry(project.display().to_string()));
-            }
-        }
-        self.project_root = Some(project);
-        Ok(self)
     }
 
     pub fn source_path(&self) -> PathBuf {
@@ -502,7 +476,6 @@ impl RulesManager {
                 original,
                 desired,
                 preserve_original: step.requires_confirmation,
-                project_root: self.project_root.clone(),
             });
         }
         let backup = BackupSnapshot {
@@ -533,7 +506,7 @@ impl RulesManager {
                         target_path: change.path.display().to_string(),
                         original: change.original.clone(),
                         applied_digest: file_state_digest(&change.desired)?,
-                        project_root: change.project_root.clone(),
+                        project_root: None,
                     })
                 })
                 .collect::<Result<Vec<_>, ArmError>>()?,
@@ -551,12 +524,6 @@ impl RulesManager {
 
         let mut completed = Vec::new();
         for (index, change) in prepared.iter().enumerate() {
-            if let Err(error) =
-                validate_project_boundary(&change.path, change.project_root.as_deref())
-            {
-                let _ = restore_prepared_changes(&prepared[..index]);
-                return Err(error);
-            }
             let current = match read_file_state(&change.path) {
                 Ok(current) => current,
                 Err(error) => {
@@ -671,7 +638,6 @@ impl RulesManager {
         source_path: &Path,
         legacy_source: Option<&Path>,
     ) -> Result<AgentStatus, ArmError> {
-        validate_project_boundary(&adapter.target_path, self.project_root.as_deref())?;
         let inspection =
             inspect_projection_target(&adapter.target_path, source_path, legacy_source)?;
         let (installed, detection_detail) = detect_adapter(adapter);
@@ -701,7 +667,6 @@ impl RulesManager {
             installed,
             connected: inspection.connected,
             detection_detail,
-            scope: adapter.scope.clone(),
             note: adapter.note.clone(),
             docs_url: adapter.docs_url.clone(),
             max_chars: adapter.max_chars,
@@ -1101,7 +1066,7 @@ fn legacy_include_is_only_managed_content(state: &FileState) -> bool {
         .is_empty()
 }
 
-/// Project instruction directories may not redirect a write outside the chosen root.
+/// Legacy project backups may not redirect a rollback outside their recorded root.
 pub(crate) fn validate_project_boundary(path: &Path, root: Option<&Path>) -> Result<(), ArmError> {
     let Some(root) = root else {
         return Ok(());
@@ -1167,10 +1132,6 @@ fn replace_file_state(
 fn restore_prepared_changes(changes: &[PreparedChange]) -> bool {
     let mut restored = true;
     for change in changes.iter().rev() {
-        if validate_project_boundary(&change.path, change.project_root.as_deref()).is_err() {
-            restored = false;
-            continue;
-        }
         match read_file_state(&change.path) {
             Ok(current) if current == change.desired => {
                 if restore_file_state(&change.path, &change.original).is_err() {
@@ -1702,7 +1663,6 @@ mod tests {
                     content: "applied first".into(),
                 },
                 preserve_original: false,
-                project_root: None,
             },
             PreparedChange {
                 agent_id: "second".into(),
@@ -1714,7 +1674,6 @@ mod tests {
                     content: "applied second".into(),
                 },
                 preserve_original: false,
-                project_root: None,
             },
         ];
 
@@ -2132,18 +2091,22 @@ mod tests {
     fn extension_detection_supports_devin_and_windsurf_directories() {
         for directory in [".devin/extensions", ".windsurf/extensions"] {
             let (_root, manager, home) = fixture();
-            let extension = home.join(directory).join("continue.continue-1.0.0");
+            let extension = home
+                .join(directory)
+                .join("rooveterinaryinc.roo-cline-1.0.0");
             fs::create_dir_all(&extension).unwrap();
-            let project = home.join("project");
-            fs::create_dir(&project).unwrap();
-            let project_manager = manager.for_project(&home, &project).unwrap();
-            let snapshot = project_manager.snapshot().unwrap();
-            let agent = snapshot.agents.iter().find(|a| a.id == "continue").unwrap();
+            let manager = RulesManager::with_adapters(
+                manager.library_root,
+                manager.state_root,
+                crate::adapters::test_adapters(&home),
+            );
+            let snapshot = manager.snapshot().unwrap();
+            let agent = snapshot.agents.iter().find(|a| a.id == "roo").unwrap();
             assert!(agent.installed);
             assert!(agent
                 .detection_detail
                 .contains(&extension.display().to_string()));
-            assert!(!project.join(".continue").exists());
+            assert!(!home.join(".roo").exists());
         }
     }
 
@@ -2184,79 +2147,65 @@ mod tests {
         );
     }
 
-    #[test]
-    fn project_connect_switch_disconnect_and_rollback_keep_rules_and_existing_files() {
-        let (_root, global, home) = fixture();
-        global.initialize().unwrap();
-        let project = home.join("project");
-        fs::create_dir(&project).unwrap();
-        fs::write(project.join("AGENTS.md"), "original project rules").unwrap();
-        let manager = global.clone().for_project(&home, &project).unwrap();
-        let plan = manager.plan(&["cursor".into()]).unwrap();
-        assert_eq!(plan.confirmation_count, 1);
-        assert!(manager.apply(&["cursor".into()]).is_err());
-        assert_eq!(
-            fs::read_to_string(project.join("AGENTS.md")).unwrap(),
-            "original project rules"
-        );
-        manager.apply_confirmed(&["cursor".into()], true).unwrap();
-        global.create_profile("work", "Work", "").unwrap();
-        fs::write(
-            global.library_root.join("profiles/work/AGENTS.md"),
-            "switched rules",
-        )
-        .unwrap();
-        global.activate_profile("work").unwrap();
-        assert!(fs::read_to_string(project.join("AGENTS.md"))
-            .unwrap()
-            .contains("switched rules"));
-        assert_eq!(manager.plan(&["cursor".into()]).unwrap().change_count, 0);
+    fn write_legacy_project_backup(manager: &RulesManager, project: &Path) -> PathBuf {
+        let target = project.join(".github/copilot-instructions.md");
+        let link = FileState::Symlink {
+            target: manager.source_path().display().to_string(),
+        };
+        fs::create_dir_all(target.parent().unwrap()).unwrap();
+        restore_file_state(&target, &link).unwrap();
         manager
-            .apply_connections(&[ConnectionChange {
-                agent_id: "cursor".into(),
-                connected: false,
-            }])
+            .write_backup(&BackupSnapshot {
+                history_epoch: crate::history::archive_epoch(&manager.state_root).unwrap(),
+                subjects: vec!["connect:GitHub Copilot (IDE)".into()],
+                id: Utc::now().format("%Y%m%dT%H%M%S%.9fZ").to_string(),
+                created_at: Utc::now().to_rfc3339(),
+                entries: vec![BackupEntry {
+                    target_path: target.display().to_string(),
+                    original: FileState::Missing,
+                    applied_digest: file_state_digest(&link).unwrap(),
+                    project_root: Some(project.to_path_buf()),
+                }],
+            })
             .unwrap();
-        assert!(!project.join("AGENTS.md").is_symlink());
-        global.rollback_latest().unwrap();
-        assert!(project.join("AGENTS.md").is_symlink());
-        global.rollback_latest().unwrap();
-        assert_eq!(
-            fs::read_to_string(project.join("AGENTS.md")).unwrap(),
-            "original project rules"
-        );
-        assert!(!home.join(".codex/AGENTS.md").exists());
+        target
     }
 
     #[test]
-    fn project_parent_links_block_apply_and_rollback_outside_the_project() {
-        let (_root, global, home) = fixture();
-        global.initialize().unwrap();
+    fn legacy_project_backups_still_roll_back() {
+        let (_root, manager, home) = fixture();
+        manager.initialize().unwrap();
+        let project = home.join("project");
+        fs::create_dir(&project).unwrap();
+        let project = project.canonicalize().unwrap();
+        let target = write_legacy_project_backup(&manager, &project);
+        assert!(target.is_symlink());
+        manager.rollback_latest().unwrap();
+        assert!(fs::symlink_metadata(&target).is_err());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn legacy_project_rollback_refuses_parent_links_outside_the_project() {
+        let (_root, manager, home) = fixture();
+        manager.initialize().unwrap();
         let project = home.join("project");
         let outside = home.join("outside");
         fs::create_dir(&project).unwrap();
         fs::create_dir(&outside).unwrap();
-        let manager = global.clone().for_project(&home, &project).unwrap();
-        std::os::unix::fs::symlink(&outside, project.join(".github")).unwrap();
-        assert!(manager.plan(&["copilot-ide".into()]).is_err());
-        assert!(manager.apply(&["copilot-ide".into()]).is_err());
-        assert!(!outside.join("copilot-instructions.md").exists());
-        fs::remove_file(project.join(".github")).unwrap();
-        manager.apply(&["copilot-ide".into()]).unwrap();
+        let project = project.canonicalize().unwrap();
+        write_legacy_project_backup(&manager, &project);
         fs::rename(project.join(".github"), project.join(".github-original")).unwrap();
         std::os::unix::fs::symlink(&outside, project.join(".github")).unwrap();
-        assert!(global.rollback_latest().is_err());
-        assert!(!outside.join("copilot-instructions.md").exists());
+        std::os::unix::fs::symlink(
+            manager.source_path(),
+            outside.join("copilot-instructions.md"),
+        )
+        .unwrap();
+        assert!(manager.rollback_latest().is_err());
+        assert!(outside.join("copilot-instructions.md").is_symlink());
         assert!(project
             .join(".github-original/copilot-instructions.md")
             .is_symlink());
-    }
-
-    #[test]
-    fn project_targets_cannot_replace_the_rule_library() {
-        let (_root, manager, home) = fixture();
-        manager.initialize().unwrap();
-        let current = manager.library_root.join("current");
-        assert!(manager.clone().for_project(&home, &current).is_err());
     }
 }

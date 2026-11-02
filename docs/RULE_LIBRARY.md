@@ -86,7 +86,7 @@ current -> .runtime/work-8d9f20b751a4
 
 选择不会改写 Profile 清单。
 
-该机器上所有全局和项目 Agent 链接都跟随这一选择。项目接入不会单独选择 Profile，也不是给其他机器用的可移植导出。
+该机器上所有 Agent 链接都跟随这一选择。
 
 ## Runtime 清单
 
