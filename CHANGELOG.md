@@ -6,14 +6,25 @@
 
 ## [未发布]
 
+## [0.2.0] - 2026-11-02
+
 ### 新增
 
 - 手动 Git 规则源同步：桌面页与 CLI 共用差异预览、三方合并、冲突三选一、确认 token、备份及漂移保护；仅同步 v3 规则源，不操作规则库自身 Git 暂存区。
 - 同步与激活保持独立，远端规则更新后需显式刷新当前 Profile；上传失败保留本机备份并支持重新预览重试，浏览器演示包含完整冲突处理流程。
+- 后台只读检查远端（设置中开启，默认关闭）：应用运行期间定时及切回窗口时生成同步预览，有待应用、待上传或冲突项时通知并在侧栏显示数量；不写规则源、不推送。
+- Agent 入口：新增 Devin Desktop（`~/.devin/global_rules.md`）、Cline 当前版本统一全局目录及 Zed Windows 原生路径；旧 Windsurf（Cascade）、Cline、Zed 入口与已有连接保持原样。
+
+### 变更
+
+- **移除项目范围**：不再管理 Cursor、Copilot IDE、Continue、Junie 的项目规则，控制台去掉「切换范围」，CLI 去掉 `--project`。已在项目中建立的链接不会被自动断开，可在操作历史中恢复或手动删除；旧备份仍按原项目目录做边界检查。
+- Antigravity 单文件上限改为 24,000 UTF-8 字节；Augment 不再套用 IDE User Guidelines 的字符限制；各客户端名称、路径与说明按官方文档重新核对。
+- Profile 卡片改为紧凑列表，设置面板铺满主内容区；macOS 图标缩小并增加透明留白。
 
 ### 修复
 
 - GitHub Release 和应用内更新说明统一从 CHANGELOG 的对应版本读取，避免修改发布页面后应用仍显示旧文案。
+- 开发模式下的应用图标随源图标更新。
 
 ## [0.1.1] - 2026-09-16
 
@@ -57,6 +68,7 @@
 - 不管理 Skills、MCP、子代理、凭据或模型登录状态。
 - 所有已接入项目跟随本机当前 Profile，不支持每个项目独立选用 Profile。
 
-[未发布]: https://github.com/songxychn/agent-rules-manager/compare/v0.1.1...HEAD
+[未发布]: https://github.com/songxychn/agent-rules-manager/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/songxychn/agent-rules-manager/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/songxychn/agent-rules-manager/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/songxychn/agent-rules-manager/releases/tag/v0.1.0

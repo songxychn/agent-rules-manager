@@ -18,7 +18,7 @@ export function desktopUpdatesAvailable(): boolean {
 }
 
 export async function appVersion(): Promise<string> {
-  if (!isTauri) return "0.1.1";
+  if (!isTauri) return "0.2.0";
   const { getVersion } = await import("@tauri-apps/api/app");
   return getVersion();
 }
