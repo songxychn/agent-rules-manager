@@ -13,6 +13,8 @@ import { backend } from "./lib/backend";
 import { checkForAppUpdate } from "./lib/appUpdate";
 import { useI18n } from "./lib/i18n";
 import { readPreferredOpenTarget, writePreferredOpenTarget } from "./lib/openTargets";
+import { readSyncWatchEnabled, writeSyncWatchEnabled } from "./lib/syncWatch";
+import { useSyncWatch } from "./lib/useSyncWatch";
 import type {
   ConnectionChange,
   LibraryPlan,
@@ -93,6 +95,21 @@ function App() {
   const { notify } = notifications;
   const snapshotRef = useRef<WorkspaceSnapshot>();
   const refreshInFlight = useRef(false);
+  const [syncWatchEnabled, setSyncWatchEnabled] = useState(readSyncWatchEnabled);
+  const syncWatch = useSyncWatch({
+    libraryRoot,
+    enabled: syncWatchEnabled,
+    paused: view === "sync",
+    onPending: (summary) => notify({
+      tone: "info",
+      message: t("syncWatch.notice", {
+        local: summary.toLocal,
+        remote: summary.toRemote,
+        conflicts: summary.conflicts,
+      }),
+    }),
+    onError: (message) => notify({ tone: "error", message: t("syncWatch.failed", { message }) }),
+  });
 
   const loadSnapshot = useCallback(async (root?: string) => {
     setBusy("loading");
@@ -324,9 +341,17 @@ function App() {
         : undefined;
 
   const renderReadyView = () => {
-    if (view === "sync") return <GitSyncPage key={libraryRoot} libraryRoot={libraryRoot} onSynced={() => loadSnapshot(libraryRoot)} onProfiles={() => setView("profiles")} />;
-    if (view === "history") return <HistoryPage key={libraryRoot} libraryRoot={libraryRoot} onRestored={() => loadSnapshot(libraryRoot)} />;
-    if (view === "settings") return <SettingsPage />;
+    if (view === "sync") return <GitSyncPage key={libraryRoot} libraryRoot={libraryRoot} onSynced={() => { syncWatch.invalidate(); return loadSnapshot(libraryRoot); }} onProfiles={() => setView("profiles")} />;
+    if (view === "history") return <HistoryPage key={libraryRoot} libraryRoot={libraryRoot} onRestored={() => { syncWatch.invalidate(); return loadSnapshot(libraryRoot); }} />;
+    if (view === "settings") {
+      return <SettingsPage syncWatch={{
+        enabled: syncWatchEnabled,
+        status: syncWatch.status,
+        checking: syncWatch.checking,
+        onToggle: (enabled) => { setSyncWatchEnabled(enabled); writeSyncWatchEnabled(enabled); },
+        onCheck: () => void syncWatch.check(),
+      }} />;
+    }
     if (view === "profiles") {
       return (
         <ProfilesPage
@@ -426,6 +451,11 @@ function App() {
             >
               <span className="nav-icon"><AppIcon name={item === "history" ? "rollback" : item} /></span>
               {t(`nav.${item}` as "nav.control")}
+              {item === "sync" && syncWatch.status.phase === "pending" && (
+                <small className="nav-badge-pending" title={t("syncWatch.badge")}>
+                  {syncWatch.status.summary.toLocal + syncWatch.status.summary.toRemote + syncWatch.status.summary.conflicts || "!"}
+                </small>
+              )}
             </button>
           ))}
         </div>

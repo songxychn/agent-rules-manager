@@ -204,6 +204,11 @@ code {
   letter-spacing: 0.04em;
 }
 
+.nav-item small.nav-badge-pending {
+  background: #dff3ec;
+  color: var(--mint-dark);
+}
+
 .nav-icon {
   display: grid;
   width: 24px;
@@ -2541,6 +2546,21 @@ code {
     grid-template-columns: 20px;
     justify-content: center;
     padding-inline: 8px;
+    font-size: 0;
+  }
+
+  .nav-primary .nav-item {
+    position: relative;
+  }
+
+  .nav-item small.nav-badge-pending {
+    position: absolute;
+    top: 5px;
+    right: 5px;
+    width: 8px;
+    height: 8px;
+    padding: 0;
+    background: var(--mint-dark);
     font-size: 0;
   }
 
