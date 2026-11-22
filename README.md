@@ -1,12 +1,17 @@
 # Agent Rules Manager
 
+> [!IMPORTANT]
+> **本项目已停止维护。**
+>
+> 如果你需要在多个 Agent 之间复用规则，建议改用 **Magpie 资源库（Library）的共享指令功能**。在资源库中维护一份指令，Magpie 会将它写入所选 Agent 的原生配置文件。详见 [Magpie 资源库文档](https://github.com/yetone/magpie/blob/main/docs/subsystems/library.md)。
+
 Agent Rules Manager 是一个 local-first 的桌面应用与 CLI：用多个 **Profile** 管理不同场景的规则，并把当前机器选中的 Profile 安全投射到 Codex、Claude Code、Antigravity、Copilot CLI、Devin Desktop 等 coding agent 的全局规则文件。
 
 规则正文仍由用户在 VS Code、Cursor、Typora 等工具中维护；本项目负责结构校验、规则生成、本机切换、Agent 检测、原生路径接入、变更预览以及带漂移保护的回滚。
 
-## 安装
+## 历史版本安装
 
-从 [GitHub Releases](https://github.com/songxychn/agent-rules-manager/releases/latest) 下载当前版本的桌面安装包：
+已发布的桌面安装包仍可从 [GitHub Releases](https://github.com/songxychn/agent-rules-manager/releases) 下载：
 
 | 系统 | 安装包 |
 | --- | --- |
@@ -21,7 +26,7 @@ Agent Rules Manager 是一个 local-first 的桌面应用与 CLI：用多个 **P
 - **Windows**：接入 Agent 规则仍需要 [开发人员模式](https://learn.microsoft.com/windows/apps/get-started/enable-your-device-for-development)（或管理员权限）才能创建符号链接。
 - **Linux**：`.deb` 适合 Debian/Ubuntu；其他发行版可用 AppImage。
 
-试用问题请用 [Issue 模板](https://github.com/songxychn/agent-rules-manager/issues/new/choose) 提交，写明操作系统、版本、复现步骤和脱敏后的计划输出；敏感问题按 [安全策略](SECURITY.md) 私下报告。公开变更见 [更新日志](CHANGELOG.md)。维护者如何打 tag 打包见 [发布说明](docs/RELEASE.md)。
+历史发布记录见 [更新日志](CHANGELOG.md)。
 
 ## 浏览器演示
 
@@ -327,7 +332,7 @@ src/               React 控制台与惰性浏览器演示
 docs/              数据格式、架构契约与发布流程
 ```
 
-实现约束见 [架构说明](docs/ARCHITECTURE.md)，参与方式见 [贡献指南](CONTRIBUTING.md)，公开变更见 [更新日志](CHANGELOG.md)。
+实现约束见 [架构说明](docs/ARCHITECTURE.md)，原发布流程见 [发布说明](docs/RELEASE.md)。
 
 ## 许可证
 
